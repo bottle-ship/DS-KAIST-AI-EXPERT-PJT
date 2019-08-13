@@ -3,6 +3,7 @@ import os
 import cv2
 import numpy as np
 import keras
+import zipfile
 
 from keras.utils import data_utils
 
@@ -16,19 +17,22 @@ class DatasetLoader(object):
         self.datasets = keras.datasets
         self.get_file = data_utils.get_file
 
-    def load_fashion_mnist(self):
+    def load_fashion_mnist(self, data_type='float32'):
         (x_train, y_train), (x_test, y_test) = self.datasets.fashion_mnist.load_data()
 
-        x_train = x_train.reshape(x_train.shape[0], 28, 28, 1).astype('float32')
-        x_test = x_test.reshape(x_test.shape[0], 28, 28, 1).astype('float32')
+        x_train = x_train.reshape(x_train.shape[0], 28, 28, 1).astype(data_type)
+        x_test = x_test.reshape(x_test.shape[0], 28, 28, 1).astype(data_type)
 
         class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
                        'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
 
         return (x_train, y_train), (x_test, y_test), class_names
 
-    def load_cifar10(self):
+    def load_cifar10(self, data_type='float32'):
         (x_train, y_train), (x_test, y_test) = self.datasets.cifar10.load_data()
+
+        x_train = x_train.astype(data_type)
+        x_test = x_test.astype(data_type)
 
         class_names = ['Airplane', 'Automobile', 'Bird', 'Cat', 'Deer',
                        'Dog', 'Frog', 'Horse', 'Ship', 'Truck']
@@ -103,7 +107,54 @@ class DatasetLoader(object):
 
         return (x_train, y_train), (x_test, y_test), class_names
 
+    def load_tiny_imagenet_subset(self):
+        src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_data', 'tiny_subset.zip')
 
-if __name__ == '__main__':
-    loader = DatasetLoader()
-    loader.load_cifar10()
+        cache_dir = os.path.join(os.path.expanduser('~'), '.keras')
+        datadir_base = os.path.expanduser(cache_dir)
+        if not os.access(datadir_base, os.W_OK):
+            datadir_base = os.path.join('/tmp', '.keras')
+        datadir = os.path.join(datadir_base, 'datasets')
+        if not os.path.exists(datadir):
+            os.makedirs(datadir)
+
+        datadir = os.path.join(datadir, 'tiny-imagenet-subset')
+
+        if not os.path.exists(datadir):
+            os.mkdir(datadir)
+            with zipfile.ZipFile(src_path) as zf:
+                zf.extractall(path=datadir)
+
+            wnids = os.listdir(os.path.join(datadir, 'train'))
+            wnid_to_label = {wnid: i for i, wnid in enumerate(wnids)}
+
+            with open(os.path.join(datadir, 'words.txt'), 'r') as f:
+                wnid_to_words = dict()
+                for line in f:
+                    line = line.split('\t')
+                    wnid_to_words[line[0]] = line[1].replace('\n', '').split(',')
+            class_names = [wnid_to_words[wnid] for wnid in wnids]
+            save_to_pickle(class_names, os.path.join(datadir, 'tiny-imagenet-subset-class-name.pkl'))
+
+            x_train = list()
+            y_train = list()
+            for label in wnid_to_label.keys():
+                target_dir = os.path.join(datadir, 'train', label, 'images')
+                for filename in os.listdir(target_dir):
+                    img = cv2.imread(os.path.join(target_dir, filename))
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    img = cv2.resize(img, dsize=(32, 32), interpolation=cv2.INTER_AREA)
+                    x_train.append(img)
+                    y_train.append(wnid_to_label[label])
+
+            x_train = np.array(x_train)
+            y_train = np.array(y_train)
+
+            np.save(os.path.join(datadir, 'tiny-imagenet-subset-x-train.npy'), x_train)
+            np.save(os.path.join(datadir, 'tiny-imagenet-subset-y-train.npy'), y_train)
+        else:
+            x_train = np.load(os.path.join(datadir, 'tiny-imagenet-subset-x-train.npy'))
+            y_train = np.load(os.path.join(datadir, 'tiny-imagenet-subset-y-train.npy'))
+            class_names = load_from_pickle(os.path.join(datadir, 'tiny-imagenet-subset-class-name.pkl'))
+
+        return (x_train, y_train), (None, None), class_names
