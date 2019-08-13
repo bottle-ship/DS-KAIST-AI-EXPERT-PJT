@@ -24,6 +24,7 @@ pip3 install --upgrade jupyter
 pip3 install --upgrade ipykernel
 pip3 install --upgrade wget
 pip3 install --upgrade zipfile2
+pip3 install --upgrade tqdm
 
 pip freeze
 
