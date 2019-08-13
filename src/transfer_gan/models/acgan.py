@@ -131,10 +131,11 @@ class BaseACGAN(BaseModel):
     def fit(self, x, y, n_gen_sample=25, log_dir=None, log_period=5):
         self._initialize()
 
-        if os.path.exists(log_dir):
-            raise FileExistsError("'%s' is already exists." % log_dir)
-        else:
-            os.mkdir(log_dir)
+        if log_dir is not None:
+            if os.path.exists(log_dir):
+                raise FileExistsError("'%s' is already exists." % log_dir)
+            else:
+                os.mkdir(log_dir)
 
         if self.fake_activation == 'sigmoid':
             scaled_x = x / 255.0
