@@ -7,7 +7,7 @@ if __name__ == '__main__':
     loader = DatasetLoader()
     (x_train, y_train), (x_test, y_test), class_names = loader.load_cifar10()
 
-    input_shape, num_classes = get_data_information(x_train, y_train.ravel())
+    input_shape, num_classes = get_data_information(x_train, y_train)
 
     model = ACGANCifar10(
         input_shape=input_shape,
@@ -19,5 +19,5 @@ if __name__ == '__main__':
         beta_1=0.5,
         epochs=15
     )
-    model.fit(x_train, y_train.ravel(), log_dir='log_cifar10', log_period=1)
+    model.fit(x_train, y_train, log_dir='log_cifar10', log_period=1)
     model.predict(label=None, plot=True)
