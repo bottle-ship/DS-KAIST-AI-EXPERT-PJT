@@ -11,17 +11,33 @@ from ..utils.pickle_utils import load_from_pickle
 from ..utils.pickle_utils import save_to_pickle
 
 
+def _get_keras_datasets_path():
+    cache_dir = os.path.join(os.path.expanduser('~'), '.keras')
+    datadir_base = os.path.expanduser(cache_dir)
+    if not os.access(datadir_base, os.W_OK):
+        datadir_base = os.path.join('/tmp', '.keras')
+    datadir = os.path.join(datadir_base, 'datasets')
+    if not os.path.exists(datadir):
+        os.makedirs(datadir)
+
+    return datadir
+
+
 class DatasetLoader(object):
 
     def __init__(self):
         self.datasets = keras.datasets
         self.get_file = data_utils.get_file
+        self.keras_datasets_path = _get_keras_datasets_path()
+        self.src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_data')
 
     def load_fashion_mnist(self, data_type='float32'):
         (x_train, y_train), (x_test, y_test) = self.datasets.fashion_mnist.load_data()
 
         x_train = x_train.reshape(x_train.shape[0], 28, 28, 1).astype(data_type)
+        y_train = y_train.astype(data_type)
         x_test = x_test.reshape(x_test.shape[0], 28, 28, 1).astype(data_type)
+        y_test = y_test.astype(data_type)
 
         class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
                        'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
@@ -32,14 +48,16 @@ class DatasetLoader(object):
         (x_train, y_train), (x_test, y_test) = self.datasets.cifar10.load_data()
 
         x_train = x_train.astype(data_type)
+        y_train = y_train.astype(data_type).ravel()
         x_test = x_test.astype(data_type)
+        y_test = y_train.astype(data_type).ravel()
 
         class_names = ['Airplane', 'Automobile', 'Bird', 'Cat', 'Deer',
                        'Dog', 'Frog', 'Horse', 'Ship', 'Truck']
 
         return (x_train, y_train), (x_test, y_test), class_names
 
-    def load_tiny_imagenet(self):
+    def load_tiny_imagenet(self, data_type='float32'):
         dirname = 'tiny-imagenet-200.zip'
         origin = 'http://cs231n.stanford.edu/tiny-imagenet-200.zip'
         path = self.get_file(dirname, origin=origin, extract=True, archive_format='zip')
@@ -77,20 +95,20 @@ class DatasetLoader(object):
             np.save(os.path.join(path, 'tiny-imagenet-y-train.npy'), y_train)
 
             with open(os.path.join(path, 'val', 'val_annotations.txt'), 'r') as f:
-                val_annortations = dict()
+                val_annotations = dict()
                 for line in f:
                     line = line.split('\t')
-                    val_annortations[line[0]] = line[1]
+                    val_annotations[line[0]] = line[1]
 
             x_test = list()
             y_test = list()
             target_dir = os.path.join(path, 'val', 'images')
-            for filename in val_annortations.keys():
+            for filename in val_annotations.keys():
                 img = cv2.imread(os.path.join(target_dir, filename))
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 img = cv2.resize(img, dsize=(32, 32), interpolation=cv2.INTER_AREA)
                 x_test.append(img)
-                y_test.append(wnid_to_label[val_annortations[filename]])
+                y_test.append(wnid_to_label[val_annotations[filename]])
 
             x_test = np.array(x_test)
             y_test = np.array(y_test)
@@ -105,20 +123,16 @@ class DatasetLoader(object):
             y_test = np.load(os.path.join(path, 'tiny-imagenet-y-test.npy'))
             class_names = load_from_pickle(os.path.join(path, 'tiny-imagenet-class-name.pkl'))
 
+        x_train = x_train.astype(data_type)
+        y_train = y_train.astype(data_type)
+        x_test = x_test.astype(data_type)
+        y_test = y_test.astype(data_type)
+
         return (x_train, y_train), (x_test, y_test), class_names
 
-    def load_tiny_imagenet_subset(self):
-        src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_data', 'tiny_subset.zip')
-
-        cache_dir = os.path.join(os.path.expanduser('~'), '.keras')
-        datadir_base = os.path.expanduser(cache_dir)
-        if not os.access(datadir_base, os.W_OK):
-            datadir_base = os.path.join('/tmp', '.keras')
-        datadir = os.path.join(datadir_base, 'datasets')
-        if not os.path.exists(datadir):
-            os.makedirs(datadir)
-
-        datadir = os.path.join(datadir, 'tiny-imagenet-subset')
+    def load_tiny_imagenet_subset(self, data_type='float32'):
+        src_path = os.path.join(self.src_path, 'tiny_subset.zip')
+        datadir = os.path.join(self.keras_datasets_path, 'tiny-imagenet-subset')
 
         if not os.path.exists(datadir):
             os.mkdir(datadir)
@@ -156,5 +170,8 @@ class DatasetLoader(object):
             x_train = np.load(os.path.join(datadir, 'tiny-imagenet-subset-x-train.npy'))
             y_train = np.load(os.path.join(datadir, 'tiny-imagenet-subset-y-train.npy'))
             class_names = load_from_pickle(os.path.join(datadir, 'tiny-imagenet-subset-class-name.pkl'))
+
+        x_train = x_train.astype(data_type)
+        y_train = y_train.astype(data_type)
 
         return (x_train, y_train), (None, None), class_names
