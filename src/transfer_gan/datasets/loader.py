@@ -31,6 +31,18 @@ class DatasetLoader(object):
         self.keras_datasets_path = _get_keras_datasets_path()
         self.src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_data')
 
+    def load_mnist(self, data_type='float32'):
+        (x_train, y_train), (x_test, y_test) = self.datasets.mnist.load_data()
+
+        x_train = x_train.reshape(x_train.shape[0], 28, 28, 1).astype(data_type)
+        y_train = y_train.astype(data_type)
+        x_test = x_test.reshape(x_test.shape[0], 28, 28, 1).astype(data_type)
+        y_test = y_test.astype(data_type)
+
+        class_names = ['%d' % i for i in range(0, 10)]
+
+        return (x_train, y_train), (x_test, y_test), class_names
+
     def load_fashion_mnist(self, data_type='float32'):
         (x_train, y_train), (x_test, y_test) = self.datasets.fashion_mnist.load_data()
 
