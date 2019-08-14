@@ -13,6 +13,7 @@ from tensorflow.python.keras.utils import plot_model
 from tqdm import trange
 
 from ..utils.keras_utils import load_model_from_json, save_model_to_json
+from ..utils.os_utils import make_directory
 from ..utils.pickle_utils import load_from_pickle, save_to_pickle
 from ..utils.visualization import show_generated_image
 
@@ -28,6 +29,7 @@ class BaseACGAN(BaseModel):
                  batch_size=64,
                  learning_rate=1e-4,
                  beta_1=0.9,
+                 beta_2=0.999,
                  epochs=15,
                  **kwargs):
         super(BaseACGAN, self).__init__(**kwargs)
@@ -39,12 +41,13 @@ class BaseACGAN(BaseModel):
         self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.beta_1 = beta_1
+        self.beta_2 = beta_2
         self.epochs = epochs
 
         self.input_channel_ = self.input_shape[-1]
 
         self._gene = self._build_generator()
-        self._valid_generator_output_shape()
+        self._validate_generator_output_shape()
         self._disc = self._build_discriminator()
 
         self.generator_optimizer = self._set_optimizer()
@@ -54,10 +57,30 @@ class BaseACGAN(BaseModel):
 
     def _initialize(self):
         self.input_channel_ = self.input_shape[-1]
-
         self.history.clear()
 
-    def _valid_generator_output_shape(self):
+    def _normalize_image(self, x):
+        if self.fake_activation == 'sigmoid':
+            scaled_x = x / 255.0
+        elif self.fake_activation == 'tanh':
+            scaled_x = x / 255.0
+            scaled_x = (scaled_x * 2.) - 1.
+        else:
+            supported_fake_activations = ('sigmoid', 'tanh')
+            raise ValueError(
+                "The fake activation '%s' is not supported. Supported activations are %s." %
+                (self.fake_activation, supported_fake_activations)
+            )
+
+        return scaled_x
+
+    def _scale_image_to_0_to_1(self, x):
+        if self.fake_activation == 'tanh':
+            x = x / 2 + 0.5
+
+        return x
+
+    def _validate_generator_output_shape(self):
         if not self.input_shape == self._gene.output_shape[1:]:
             raise ValueError(
                 "Mismatch input shape(%s) and generator output shape(%s)" %
@@ -73,7 +96,7 @@ class BaseACGAN(BaseModel):
         raise NotImplementedError
 
     def _set_optimizer(self):
-        return tf.keras.optimizers.Adam(lr=self.learning_rate, beta_1=self.beta_1)
+        return tf.keras.optimizers.Adam(lr=self.learning_rate, beta_1=self.beta_1, beta_2=self.beta_2)
 
     def _compute_loss(self, x, y):
         _cross_entropy = losses.BinaryCrossentropy(from_logits=True)
@@ -119,8 +142,8 @@ class BaseACGAN(BaseModel):
         with tf.GradientTape() as discriminator_tape, tf.GradientTape() as generator_tape:
             loss_discriminator, loss_generator = self._compute_loss(x, y)
 
-        grad_discriminator = discriminator_tape.gradient(loss_discriminator, self._disc.trainable_variables)
-        grad_generator = generator_tape.gradient(loss_generator, self._gene.trainable_variables)
+            grad_discriminator = discriminator_tape.gradient(loss_discriminator, self._disc.trainable_variables)
+            grad_generator = generator_tape.gradient(loss_generator, self._gene.trainable_variables)
 
         return grad_discriminator, grad_generator, loss_discriminator, loss_generator
 
@@ -132,20 +155,9 @@ class BaseACGAN(BaseModel):
         self._initialize()
 
         if log_dir is not None:
-            if os.path.exists(log_dir):
-                raise FileExistsError("'%s' is already exists." % log_dir)
-            else:
-                os.mkdir(log_dir)
+            make_directory(log_dir)
 
-        if self.fake_activation == 'sigmoid':
-            scaled_x = x / 255.0
-        elif self.fake_activation == 'tanh':
-            scaled_x = x / 255.0
-            scaled_x = (scaled_x * 2.) - 1.
-        else:
-            self.fake_activation = 'tanh'
-            scaled_x = x / 255.0
-            scaled_x = (scaled_x * 2.) - 1.
+        scaled_x = self._normalize_image(x)
 
         ds_train = tf.data.Dataset.from_tensor_slices((scaled_x, y)).shuffle(scaled_x.shape[0]).batch(self.batch_size)
 
@@ -179,8 +191,7 @@ class BaseACGAN(BaseModel):
                 self.save_model(model_dir_name=os.path.join(log_dir, 'epoch_%05d' % epoch))
 
                 gene_img = self._gene([random_vector, test_cls_onehot], training=False).numpy()
-                if self.fake_activation == 'tanh':
-                    gene_img = gene_img / 2 + 0.5
+                gene_img = self._scale_image_to_0_to_1(gene_img)
 
                 show_generated_image(gene_img, filename=os.path.join(log_dir, 'epoch_%05d.png' % epoch))
 
@@ -197,20 +208,15 @@ class BaseACGAN(BaseModel):
         test_cls_onehot = tf.keras.utils.to_categorical(random_cls, self.num_classes)
 
         gene_img = self._gene([random_vector, test_cls_onehot], training=False).numpy()
-
-        if self.fake_activation == 'tanh':
-            gene_img = gene_img / 2 + 0.5
+        gene_img = self._scale_image_to_0_to_1(gene_img)
 
         if plot:
             show_generated_image(gene_img, filename=filename)
 
         return gene_img, random_cls
 
-    def save_model(self, model_dir_name=None):
-        if os.path.exists(model_dir_name):
-            raise FileExistsError("'%s' is already exists." % model_dir_name)
-        else:
-            os.mkdir(model_dir_name)
+    def save_model(self, model_dir_name):
+        make_directory(model_dir_name)
 
         save_to_pickle(self.get_params(), os.path.join(model_dir_name, 'params.pkl'))
 
@@ -224,7 +230,7 @@ class BaseACGAN(BaseModel):
             os.path.join(model_dir_name, 'history.pkl')
         )
 
-    def load_model(self, model_dir_name=None):
+    def load_model(self, model_dir_name):
         self.set_params(**load_from_pickle(os.path.join(model_dir_name, 'params.pkl')))
 
         self._initialize()
