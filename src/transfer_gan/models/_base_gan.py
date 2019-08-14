@@ -3,7 +3,6 @@ import os
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-import tensorflow.python.keras as keras
 
 from abc import abstractmethod
 from scipy import linalg
@@ -65,7 +64,8 @@ class BaseGAN(BaseModel):
 
         self.inception_input_shape = None
         self.inception = None
-        self._load_inception_model()
+        if self.n_fid_samples > 0:
+            self._load_inception_model()
 
         self.history = list()
 
@@ -126,7 +126,7 @@ class BaseGAN(BaseModel):
 
     def _load_inception_model(self):
         self.inception_input_shape = (96, 96, 3)
-        self.inception = keras.applications.InceptionV3(
+        self.inception = tf.contrib.keras.applications.InceptionV3(
             include_top=False, pooling='avg', input_shape=self.inception_input_shape
         )
 
