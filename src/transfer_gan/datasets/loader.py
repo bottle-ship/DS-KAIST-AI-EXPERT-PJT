@@ -142,7 +142,7 @@ class DatasetLoader(object):
 
         return (x_train, y_train), (x_test, y_test), class_names
 
-    def load_tiny_imagenet_subset(self, data_type='float32'):
+    def load_tiny_imagenet_subset(self, data_type=32):
         src_path = os.path.join(self.src_path, 'tiny_subset.zip')
         datadir = os.path.join(self.keras_datasets_path, 'tiny-imagenet-subset')
 
