@@ -31,45 +31,45 @@ class DatasetLoader(object):
         self.keras_datasets_path = _get_keras_datasets_path()
         self.src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_data')
 
-    def load_mnist(self, data_type='float32'):
+    def load_mnist(self, data_type=32):
         (x_train, y_train), (x_test, y_test) = self.datasets.mnist.load_data()
 
-        x_train = x_train.reshape(x_train.shape[0], 28, 28, 1).astype(data_type)
-        y_train = y_train.astype(data_type)
-        x_test = x_test.reshape(x_test.shape[0], 28, 28, 1).astype(data_type)
-        y_test = y_test.astype(data_type)
+        x_train = x_train.reshape(x_train.shape[0], 28, 28, 1).astype('float%d' % data_type)
+        y_train = y_train.astype('int%d' % data_type)
+        x_test = x_test.reshape(x_test.shape[0], 28, 28, 1).astype('float%d' % data_type)
+        y_test = y_test.astype('int%d' % data_type)
 
         class_names = ['%d' % i for i in range(0, 10)]
 
         return (x_train, y_train), (x_test, y_test), class_names
 
-    def load_fashion_mnist(self, data_type='float32'):
+    def load_fashion_mnist(self, data_type=32):
         (x_train, y_train), (x_test, y_test) = self.datasets.fashion_mnist.load_data()
 
-        x_train = x_train.reshape(x_train.shape[0], 28, 28, 1).astype(data_type)
-        y_train = y_train.astype(data_type)
-        x_test = x_test.reshape(x_test.shape[0], 28, 28, 1).astype(data_type)
-        y_test = y_test.astype(data_type)
+        x_train = x_train.reshape(x_train.shape[0], 28, 28, 1).astype('float%d' % data_type)
+        y_train = y_train.astype('int%d' % data_type)
+        x_test = x_test.reshape(x_test.shape[0], 28, 28, 1).astype('float%d' % data_type)
+        y_test = y_test.astype('int%d' % data_type)
 
         class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
                        'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
 
         return (x_train, y_train), (x_test, y_test), class_names
 
-    def load_cifar10(self, data_type='float32'):
+    def load_cifar10(self, data_type=32):
         (x_train, y_train), (x_test, y_test) = self.datasets.cifar10.load_data()
 
-        x_train = x_train.astype(data_type)
-        y_train = y_train.astype(data_type).ravel()
-        x_test = x_test.astype(data_type)
-        y_test = y_train.astype(data_type).ravel()
+        x_train = x_train.astype('float%d' % data_type)
+        y_train = y_train.astype('int%d' % data_type).ravel()
+        x_test = x_test.astype('float%d' % data_type)
+        y_test = y_train.astype('int%d' % data_type).ravel()
 
         class_names = ['Airplane', 'Automobile', 'Bird', 'Cat', 'Deer',
                        'Dog', 'Frog', 'Horse', 'Ship', 'Truck']
 
         return (x_train, y_train), (x_test, y_test), class_names
 
-    def load_tiny_imagenet(self, data_type='float32'):
+    def load_tiny_imagenet(self, data_type=32):
         dirname = 'tiny-imagenet-200.zip'
         origin = 'http://cs231n.stanford.edu/tiny-imagenet-200.zip'
         path = self.get_file(dirname, origin=origin, extract=True, archive_format='zip')
@@ -135,10 +135,10 @@ class DatasetLoader(object):
             y_test = np.load(os.path.join(path, 'tiny-imagenet-y-test.npy'))
             class_names = load_from_pickle(os.path.join(path, 'tiny-imagenet-class-name.pkl'))
 
-        x_train = x_train.astype(data_type)
-        y_train = y_train.astype(data_type)
-        x_test = x_test.astype(data_type)
-        y_test = y_test.astype(data_type)
+        x_train = x_train.astype('float%d' % data_type)
+        y_train = y_train.astype('int%d' % data_type)
+        x_test = x_test.astype('float%d' % data_type)
+        y_test = y_test.astype('int%d' % data_type)
 
         return (x_train, y_train), (x_test, y_test), class_names
 
@@ -183,7 +183,7 @@ class DatasetLoader(object):
             y_train = np.load(os.path.join(datadir, 'tiny-imagenet-subset-y-train.npy'))
             class_names = load_from_pickle(os.path.join(datadir, 'tiny-imagenet-subset-class-name.pkl'))
 
-        x_train = x_train.astype(data_type)
-        y_train = y_train.astype(data_type)
+        x_train = x_train.astype('float%d' % data_type)
+        y_train = y_train.astype('int%d' % data_type)
 
         return (x_train, y_train), (None, None), class_names
