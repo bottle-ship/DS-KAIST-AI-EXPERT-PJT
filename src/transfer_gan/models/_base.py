@@ -7,7 +7,7 @@ from tensorflow.python.keras import backend
 
 class BaseModel(BaseEstimator):
 
-    def __init__(self, **kwargs):
+    def __init__(self):
         super(BaseModel, self).__init__()
 
         tf.enable_eager_execution()

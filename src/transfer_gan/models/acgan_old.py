@@ -1,49 +1,123 @@
 import os
 
 import numpy as np
+import pandas as pd
+
 import tensorflow as tf
+import tensorflow.python.keras as keras
 
 from abc import abstractmethod
+from scipy import linalg
+from skimage.transform import resize
 from tensorflow.python.keras import layers
 from tensorflow.python.keras import losses
+from tensorflow.python.keras.utils import plot_model
 from tqdm import trange
 
+from ..utils.keras_utils import load_model_from_json, save_model_to_json
 from ..utils.os_utils import make_directory
+from ..utils.pickle_utils import load_from_pickle, save_to_pickle
 from ..utils.visualization import show_generated_image
 
-from ._base_gan import BaseGAN
-from ._base_gan import compute_fid
+from ._base import BaseModel
 
 
-class BaseACGAN(BaseGAN):
+class BaseACGAN(BaseModel):
 
     def __init__(self, input_shape,
                  num_classes,
                  noise_dim,
                  fake_activation='tanh',
-                 optimizer='adam',
-                 learning_rate=1e-4,
-                 adam_beta_1=0.9,
-                 adam_beta_2=0.999,
                  batch_size=64,
+                 learning_rate=1e-4,
+                 beta_1=0.9,
+                 beta_2=0.999,
                  epochs=15,
                  n_fid_samples=5000,
                  **kwargs):
-        self.num_classes = num_classes
+        super(BaseACGAN, self).__init__()
 
-        super(BaseACGAN, self).__init__(
-            input_shape=input_shape,
-            noise_dim=noise_dim,
-            fake_activation=fake_activation,
-            optimizer=optimizer,
-            learning_rate=learning_rate,
-            adam_beta_1=adam_beta_1,
-            adam_beta_2=adam_beta_2,
-            batch_size=batch_size,
-            epochs=epochs,
-            n_fid_samples=n_fid_samples,
-            **kwargs
+        self.input_shape = input_shape
+        self.num_classes = num_classes
+        self.noise_dim = noise_dim
+        self.fake_activation = fake_activation
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.beta_1 = beta_1
+        self.beta_2 = beta_2
+        self.epochs = epochs
+        self.n_fid_samples = n_fid_samples
+
+        self.input_channel_ = self.input_shape[-1]
+
+        self._gene = self._build_generator()
+        self._validate_generator_output_shape()
+        self._disc = self._build_discriminator()
+
+        self.generator_optimizer = self._set_optimizer()
+        self.discriminator_optimizer = self._set_optimizer()
+
+        self.history = list()
+
+        self.inception_input_shape = (96, 96, self.input_channel_)
+        self.inception = keras.applications.InceptionV3(
+            include_top=False, pooling='avg', input_shape=self.inception_input_shape
         )
+
+    def _initialize(self):
+        self.input_channel_ = self.input_shape[-1]
+        self.history.clear()
+
+    def _scaling_image(self, x):
+        if self.fake_activation == 'sigmoid':
+            scaled_x = x / 255.0
+        elif self.fake_activation == 'tanh':
+            scaled_x = x / 255.0
+            scaled_x = (scaled_x * 2.) - 1.
+        else:
+            supported_fake_activations = ('sigmoid', 'tanh')
+            raise ValueError(
+                "The fake activation '%s' is not supported. Supported activations are %s." %
+                (self.fake_activation, supported_fake_activations)
+            )
+
+        return scaled_x
+
+    def _unscaling_image(self, x):
+        if self.fake_activation == 'tanh':
+            x = x / 2 + 0.5
+        x = x * 255.0
+
+        return x
+
+    def _validate_generator_output_shape(self):
+        if not self.input_shape == self._gene.output_shape[1:]:
+            raise ValueError(
+                "Mismatch input shape(%s) and generator output shape(%s)" %
+                (self.input_shape, self._gene.output_shape[1:])
+            )
+
+    def _resize_image_for_fid(self, images):
+        return np.asarray([resize(image, self.inception_input_shape, 0) for image in images])
+
+    def _compute_image_mean_and_cov(self, images):
+        images = self._resize_image_for_fid(images)
+        outputs = self.inception.predict(images)
+
+        mean = outputs.mean(axis=0)
+        cov = np.cov(outputs, rowvar=False)
+
+        return mean, cov
+
+    def _compute_fid(self, mean1, cov1, mean2, cov2):
+        #  https://stackoverflow.com/questions/55421153/fr%c3%a9chet-inception-distance-parameters-choice-in-tensorflow
+        sum_sq_diff = np.sum((mean1 - mean2) ** 2)
+        cov_mean = linalg.sqrtm(cov1.dot(cov2))
+        if np.iscomplexobj(cov_mean):
+            cov_mean = cov_mean.real
+        fid = sum_sq_diff + np.trace(cov1 + cov2 - 2.0 * cov_mean)
+
+        return fid
 
     @abstractmethod
     def _build_generator(self):
@@ -52,6 +126,9 @@ class BaseACGAN(BaseGAN):
     @abstractmethod
     def _build_discriminator(self):
         raise NotImplementedError
+
+    def _set_optimizer(self):
+        return tf.keras.optimizers.Adam(lr=self.learning_rate, beta_1=self.beta_1, beta_2=self.beta_2)
 
     def _compute_loss(self, x, y):
         _cross_entropy = losses.BinaryCrossentropy(from_logits=True)
@@ -103,37 +180,10 @@ class BaseACGAN(BaseGAN):
         return grad_discriminator, grad_generator, loss_discriminator, loss_generator
 
     def _apply_gradients_discriminator(self, grad_discriminator):
-        self._disc_optimizer.apply_gradients(zip(grad_discriminator, self._disc.trainable_variables))
+        self.discriminator_optimizer.apply_gradients(zip(grad_discriminator, self._disc.trainable_variables))
 
     def _apply_gradients_generator(self, grad_generator):
-        self._gene_optimizer.apply_gradients(zip(grad_generator, self._gene.trainable_variables))
-
-    def _random_sampling_from_real_data(self, x, y):
-        idx = np.random.randint(0, x.shape[0], self.n_fid_samples)
-        x = x[idx]
-        y = y[idx]
-
-        selected_label = tf.convert_to_tensor(y, dtype=tf.dtypes.int32)
-        selected_onehot = tf.keras.utils.to_categorical(selected_label, self.num_classes)
-
-        return x, selected_onehot
-
-    def _set_random_noise_and_onehot(self, n_image=None, label=None):
-        if n_image is None:
-            n_image = self.batch_size
-
-        if label is None:
-            min_label = 0
-            max_label = self.num_classes
-        else:
-            min_label = label
-            max_label = label + 1
-
-        random_noise = tf.random.normal([n_image, self.noise_dim])
-        random_label = tf.random.uniform([n_image, ], min_label, max_label, dtype=tf.dtypes.int32)
-        random_onehot = tf.keras.utils.to_categorical(random_label, self.num_classes)
-
-        return random_noise, random_onehot, random_label
+        self.generator_optimizer.apply_gradients(zip(grad_generator, self._gene.trainable_variables))
 
     def fit(self, x, y, log_dir=None, log_period=5):
         self._initialize()
@@ -143,14 +193,19 @@ class BaseACGAN(BaseGAN):
 
         scaled_x = self._scaling_image(x)
 
-        selected_images, selected_onehot = self._random_sampling_from_real_data(scaled_x, y)
-        fid_random_noise = tf.random.normal([self.n_fid_samples, self.noise_dim])
+        idx = np.random.randint(0, scaled_x.shape[0], self.n_fid_samples)
+        ref_image = scaled_x[idx]
+        ref_cls = tf.convert_to_tensor(y[idx], dtype=tf.dtypes.int32)
+        fid_random_vector = tf.random.normal([self.n_fid_samples, self.noise_dim])
+        fid_cls_onehot = tf.keras.utils.to_categorical(ref_cls, self.num_classes)
 
-        real_mean, real_cov = self._compute_image_mean_and_cov(selected_images)
+        real_mean, real_cov = self._compute_image_mean_and_cov(ref_image)
 
         ds_train = tf.data.Dataset.from_tensor_slices((scaled_x, y)).shuffle(scaled_x.shape[0]).batch(self.batch_size)
 
-        random_noise, random_onehot, _ = self._set_random_noise_and_onehot()
+        random_vector = tf.random.normal([self.batch_size, self.noise_dim])
+        random_cls = tf.random.uniform([self.batch_size, ], 0, self.num_classes, dtype=tf.dtypes.int32)
+        test_cls_onehot = tf.keras.utils.to_categorical(random_cls, self.num_classes)
 
         for epoch in range(1, self.epochs + 1):
             epoch_loss_disc = list()
@@ -173,33 +228,75 @@ class BaseACGAN(BaseGAN):
                 )
             tqdm_range.close()
 
-            fid_gene_images = self._gene([fid_random_noise, selected_onehot], training=False).numpy()
-            fid_fake_mean, fid_fake_cov = self._compute_image_mean_and_cov(fid_gene_images)
+            gene_img_1 = self._gene([fid_random_vector, fid_cls_onehot], training=False).numpy()
+            fake_mean, fake_cov = self._compute_image_mean_and_cov(gene_img_1)
 
-            fid = compute_fid(real_mean, real_cov, fid_fake_mean, fid_fake_cov)
-            print("FID: %.2f" % fid)
+            fid = self._compute_fid(real_mean, real_cov, fake_mean, fake_cov)
+            print(fid)
 
             self.history.append([epoch, np.array(epoch_loss_disc).mean(), np.array(epoch_loss_gene).mean(), fid])
 
             if log_dir is not None and epoch % log_period == 0:
                 self.save_model(model_dir_name=os.path.join(log_dir, 'epoch_%05d' % epoch))
-                gene_img = self._gene([random_noise, random_onehot], training=False).numpy()
+                gene_img = self._gene([random_vector, test_cls_onehot], training=False).numpy()
                 gene_img = self._unscaling_image(gene_img)
                 show_generated_image(gene_img, filename=os.path.join(log_dir, 'epoch_%05d.png' % epoch))
 
-    def predict(self, label=None, n_image=25, plot=False, filename=None):
+    def predict(self, label=None, n_gen_sample=25, plot=False, filename=None):
         if label is not None and label >= self.num_classes:
             raise ValueError("The label must be < %d" % self.num_classes)
 
-        random_noise, random_onehot, random_label = self._set_random_noise_and_onehot(n_image=n_image, label=label)
+        random_vector = tf.random.normal([n_gen_sample, self.noise_dim])
+        if label is None:
+            random_cls = tf.random.uniform([n_gen_sample, ], 0, self.num_classes, dtype=tf.dtypes.int32)
+        else:
+            random_cls = tf.random.uniform([n_gen_sample, ], label, label + 1, dtype=tf.dtypes.int32)
 
-        gene_img = self._gene([random_noise, random_onehot], training=False).numpy()
+        test_cls_onehot = tf.keras.utils.to_categorical(random_cls, self.num_classes)
+
+        gene_img = self._gene([random_vector, test_cls_onehot], training=False).numpy()
         gene_img = self._unscaling_image(gene_img)
 
         if plot:
             show_generated_image(gene_img, filename=filename)
 
-        return gene_img, random_label.numpy()
+        return gene_img, random_cls
+
+    def save_model(self, model_dir_name):
+        make_directory(model_dir_name)
+
+        save_to_pickle(self.get_params(), os.path.join(model_dir_name, 'params.pkl'))
+
+        save_model_to_json(self._gene, os.path.join(model_dir_name, 'generator_model.json'))
+        self._gene.save_weights(os.path.join(model_dir_name, 'generator_weights.h5'))
+
+        save_model_to_json(self._disc, os.path.join(model_dir_name, 'discriminator_model.json'))
+        self._disc.save_weights(os.path.join(model_dir_name, 'discriminator_weights.h5'))
+
+        pd.DataFrame(self.history, columns=['Epochs', 'Loss_Disc', 'Loss_Gene', 'FID']).to_pickle(
+            os.path.join(model_dir_name, 'history.pkl')
+        )
+
+    def load_model(self, model_dir_name):
+        self.set_params(**load_from_pickle(os.path.join(model_dir_name, 'params.pkl')))
+
+        self._initialize()
+
+        self._gene = load_model_from_json(os.path.join(model_dir_name, 'generator_model.json'))
+        self._gene.load_weights(os.path.join(model_dir_name, 'generator_weights.h5'))
+
+        self._disc = load_model_from_json(os.path.join(model_dir_name, 'discriminator_model.json'))
+        self._disc.load_weights(os.path.join(model_dir_name, 'discriminator_weights.h5'))
+
+        self.history = pd.read_pickle(os.path.join(model_dir_name, 'history.pkl')).values.tolist()
+
+    def show_generator_model(self, filename='generator.png'):
+        self._gene.summary()
+        plot_model(self._gene, filename)
+
+    def show_discriminator_model(self, filename='discriminator.png'):
+        self._disc.summary()
+        plot_model(self._disc, filename)
 
 
 class ACGANFashionMnist(BaseACGAN):
@@ -208,26 +305,20 @@ class ACGANFashionMnist(BaseACGAN):
                  num_classes,
                  noise_dim,
                  fake_activation='tanh',
-                 optimizer='adam',
-                 learning_rate=1e-4,
-                 adam_beta_1=0.9,
-                 adam_beta_2=0.999,
                  batch_size=64,
+                 learning_rate=1e-4,
+                 beta_1=0.9,
                  epochs=15,
-                 n_fid_samples=5000,
                  **kwargs):
         super(ACGANFashionMnist, self).__init__(
             input_shape=input_shape,
             num_classes=num_classes,
             noise_dim=noise_dim,
             fake_activation=fake_activation,
-            optimizer=optimizer,
-            learning_rate=learning_rate,
-            adam_beta_1=adam_beta_1,
-            adam_beta_2=adam_beta_2,
             batch_size=batch_size,
+            learning_rate=learning_rate,
+            beta_1=beta_1,
             epochs=epochs,
-            n_fid_samples=n_fid_samples,
             **kwargs
         )
 
@@ -284,26 +375,20 @@ class ACGANCifar10(BaseACGAN):
                  num_classes,
                  noise_dim,
                  fake_activation='tanh',
-                 optimizer='adam',
-                 learning_rate=1e-4,
-                 adam_beta_1=0.9,
-                 adam_beta_2=0.999,
                  batch_size=64,
+                 learning_rate=1e-4,
+                 beta_1=0.9,
                  epochs=15,
-                 n_fid_samples=5000,
                  **kwargs):
         super(ACGANCifar10, self).__init__(
             input_shape=input_shape,
             num_classes=num_classes,
             noise_dim=noise_dim,
             fake_activation=fake_activation,
-            optimizer=optimizer,
-            learning_rate=learning_rate,
-            adam_beta_1=adam_beta_1,
-            adam_beta_2=adam_beta_2,
             batch_size=batch_size,
+            learning_rate=learning_rate,
+            beta_1=beta_1,
             epochs=epochs,
-            n_fid_samples=n_fid_samples,
             **kwargs
         )
 
@@ -352,103 +437,3 @@ class ACGANCifar10(BaseACGAN):
         aux = layers.Dense(self.num_classes, name='auxiliary')(features)
 
         return tf.keras.Model(image, [validity, aux])
-
-
-class ACGANTinyImagenet(BaseACGAN):
-
-    def __init__(self, input_shape,
-                 num_classes,
-                 noise_dim=110,
-                 fake_activation='tanh',
-                 optimizer='adam',
-                 learning_rate=1e-4,
-                 adam_beta_1=0.7,
-                 adam_beta_2=0.999,
-                 batch_size=64,
-                 epochs=3000,
-                 n_fid_samples=5000,
-                 **kwargs):
-        super(ACGANTinyImagenet, self).__init__(
-            input_shape=input_shape,
-            num_classes=num_classes,
-            noise_dim=noise_dim,
-            fake_activation=fake_activation,
-            optimizer=optimizer,
-            learning_rate=learning_rate,
-            adam_beta_1=adam_beta_1,
-            adam_beta_2=adam_beta_2,
-            batch_size=batch_size,
-            epochs=epochs,
-            n_fid_samples=n_fid_samples,
-            **kwargs
-        )
-
-    def _build_generator(self):
-        z = layers.Input(shape=(self.noise_dim,))
-        y = layers.Input(shape=(self.num_classes,))
-
-        inputs = layers.concatenate([z, y])
-
-        x = layers.Dense(8 * 8 * 256, use_bias=False)(inputs)
-        x = layers.BatchNormalization()(x)
-        x = layers.ReLU()(x)
-        x = layers.Reshape((8, 8, 256))(x)
-
-        x = layers.Conv2DTranspose(128, (5, 5), strides=(1, 1), padding='same', use_bias=False)(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.ReLU()(x)
-
-        x = layers.Conv2DTranspose(64, (5, 5), strides=(2, 2), padding='same', use_bias=False)(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.ReLU()(x)
-
-        x = layers.Conv2DTranspose(self.input_channel_, (5, 5), strides=(2, 2), padding='same', use_bias=False)(x)
-
-        fake = layers.Activation(self.fake_activation)(x)
-
-        return tf.keras.Model([z, y], fake)
-
-    def _build_discriminator(self):
-        image = layers.Input(shape=self.input_shape)
-
-        x = layers.Conv2D(16, kernel_size=3, strides=2, padding='same',
-                          kernel_initializer='glorot_normal', bias_initializer='Zeros')(image)
-        x = layers.LeakyReLU(alpha=0.2)(x)
-        x = layers.Dropout(0.5)(x)
-
-        x = layers.Conv2D(32, kernel_size=3, strides=1, padding='same',
-                          kernel_initializer='glorot_normal', bias_initializer='Zeros')(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.LeakyReLU(alpha=0.2)(x)
-        x = layers.Dropout(0.5)(x)
-
-        x = layers.Conv2D(64, kernel_size=3, strides=2, padding='same',
-                          kernel_initializer='glorot_normal', bias_initializer='Zeros')(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.LeakyReLU(alpha=0.2)(x)
-        x = layers.Dropout(0.5)(x)
-
-        x = layers.Conv2D(128, kernel_size=3, strides=1, padding='same',
-                          kernel_initializer='glorot_normal', bias_initializer='Zeros')(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.LeakyReLU(alpha=0.2)(x)
-        x = layers.Dropout(0.5)(x)
-
-        x = layers.Conv2D(256, kernel_size=3, strides=2, padding='same',
-                          kernel_initializer='glorot_normal', bias_initializer='Zeros')(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.LeakyReLU(alpha=0.2)(x)
-        x = layers.Dropout(0.5)(x)
-
-        x = layers.Conv2D(512, kernel_size=3, strides=1, padding='same',
-                          kernel_initializer='glorot_normal', bias_initializer='Zeros')(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.LeakyReLU(alpha=0.2)(x)
-        x = layers.Dropout(0.5)(x)
-
-        features = layers.Flatten()(x)
-
-        disc = layers.Dense(1, name='discriminator')(features)
-        aux = layers.Dense(self.num_classes, name='auxiliary')(features)
-
-        return tf.keras.Model(image, [disc, aux])
