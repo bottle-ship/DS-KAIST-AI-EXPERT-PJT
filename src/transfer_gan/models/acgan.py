@@ -66,7 +66,7 @@ class BaseACGAN(BaseModel):
         self.input_channel_ = self.input_shape[-1]
         self.history.clear()
 
-    def _normalize_image(self, x):
+    def _scaling_image(self, x):
         if self.fake_activation == 'sigmoid':
             scaled_x = x / 255.0
         elif self.fake_activation == 'tanh':
@@ -81,9 +81,10 @@ class BaseACGAN(BaseModel):
 
         return scaled_x
 
-    def _scale_image_to_0_to_1(self, x):
+    def _unscaling_image(self, x):
         if self.fake_activation == 'tanh':
             x = x / 2 + 0.5
+        x = x * 255.0
 
         return x
 
@@ -173,8 +174,10 @@ class BaseACGAN(BaseModel):
 
         return grad_discriminator, grad_generator, loss_discriminator, loss_generator
 
-    def _apply_gradients(self, grad_discriminator, grad_generator):
+    def _apply_gradients_discriminator(self, grad_discriminator):
         self.discriminator_optimizer.apply_gradients(zip(grad_discriminator, self._disc.trainable_variables))
+
+    def _apply_gradients_generator(self, grad_generator):
         self.generator_optimizer.apply_gradients(zip(grad_generator, self._gene.trainable_variables))
 
     def fit(self, x, y, log_dir=None, log_period=5):
@@ -183,7 +186,7 @@ class BaseACGAN(BaseModel):
         if log_dir is not None:
             make_directory(log_dir)
 
-        scaled_x = self._normalize_image(x)
+        scaled_x = self._scaling_image(x)
 
         ds_train = tf.data.Dataset.from_tensor_slices((scaled_x, y)).shuffle(scaled_x.shape[0]).batch(self.batch_size)
         ref_x_tr_batch = None
@@ -199,12 +202,13 @@ class BaseACGAN(BaseModel):
             tqdm_range = trange(int(np.ceil(x.shape[0] / self.batch_size)))
             for (x_tr_batch, y_tr_batch), _ in zip(ds_train, tqdm_range):
                 if ref_x_tr_batch is None:
-                    ref_x_tr_batch = x_tr_batch.numpy()
+                    ref_x_tr_batch = self._unscaling_image(x_tr_batch.numpy())
 
                 grad_disc, grad_gene, loss_disc, loss_gene = self._compute_gradients(
                     x_tr_batch, y_tr_batch
                 )
-                self._apply_gradients(grad_disc, grad_gene)
+                self._apply_gradients_discriminator(grad_disc)
+                self._apply_gradients_generator(grad_gene)
 
                 epoch_loss_disc.append(loss_disc)
                 epoch_loss_gene.append(loss_gene)
@@ -216,7 +220,7 @@ class BaseACGAN(BaseModel):
             tqdm_range.close()
 
             gene_img = self._gene([random_vector, test_cls_onehot], training=False).numpy()
-            gene_img = self._scale_image_to_0_to_1(gene_img)
+            gene_img = self._unscaling_image(gene_img)
             fid = self._compute_fid(ref_x_tr_batch, gene_img)
             print(fid)
             self.history.append([epoch, np.array(epoch_loss_disc).mean(), np.array(epoch_loss_gene).mean(), fid])
@@ -238,7 +242,7 @@ class BaseACGAN(BaseModel):
         test_cls_onehot = tf.keras.utils.to_categorical(random_cls, self.num_classes)
 
         gene_img = self._gene([random_vector, test_cls_onehot], training=False).numpy()
-        gene_img = self._scale_image_to_0_to_1(gene_img)
+        gene_img = self._unscaling_image(gene_img)
 
         if plot:
             show_generated_image(gene_img, filename=filename)
