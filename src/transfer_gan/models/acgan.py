@@ -151,7 +151,7 @@ class BaseACGAN(BaseModel):
         self.discriminator_optimizer.apply_gradients(zip(grad_discriminator, self._disc.trainable_variables))
         self.generator_optimizer.apply_gradients(zip(grad_generator, self._gene.trainable_variables))
 
-    def fit(self, x, y, n_gen_sample=25, log_dir=None, log_period=5):
+    def fit(self, x, y, log_dir=None, log_period=5):
         self._initialize()
 
         if log_dir is not None:
@@ -161,8 +161,8 @@ class BaseACGAN(BaseModel):
 
         ds_train = tf.data.Dataset.from_tensor_slices((scaled_x, y)).shuffle(scaled_x.shape[0]).batch(self.batch_size)
 
-        random_vector = tf.random.normal([n_gen_sample, self.noise_dim])
-        random_cls = tf.random.uniform([n_gen_sample, ], 0, self.num_classes, dtype=tf.dtypes.int32)
+        random_vector = tf.random.normal([self.batch_size, self.noise_dim])
+        random_cls = tf.random.uniform([self.batch_size, ], 0, self.num_classes, dtype=tf.dtypes.int32)
         test_cls_onehot = tf.keras.utils.to_categorical(random_cls, self.num_classes)
 
         for epoch in range(1, self.epochs + 1):
