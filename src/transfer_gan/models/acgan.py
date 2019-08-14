@@ -1,6 +1,5 @@
 import os
 
-import math
 import numpy as np
 import pandas as pd
 
@@ -169,7 +168,7 @@ class BaseACGAN(BaseModel):
             epoch_loss_disc = list()
             epoch_loss_gene = list()
 
-            tqdm_range = trange(math.ceil(x.shape[0] / self.batch_size))
+            tqdm_range = trange(int(np.ceil(x.shape[0] / self.batch_size)))
             for (x_tr_batch, y_tr_batch), _ in zip(ds_train, tqdm_range):
                 grad_disc, grad_gene, loss_disc, loss_gene = self._compute_gradients(
                     x_tr_batch, y_tr_batch
@@ -316,10 +315,10 @@ class ACGANFashionMnist(BaseACGAN):
 
         features = layers.Flatten()(x)
 
-        disc = layers.Dense(1, name='discriminator')(features)
+        validity = layers.Dense(1, name='discriminator')(features)
         aux = layers.Dense(self.num_classes, name='auxiliary')(features)
 
-        return tf.keras.Model(image, [disc, aux])
+        return tf.keras.Model(image, [validity, aux])
 
 
 class ACGANCifar10(BaseACGAN):
@@ -386,7 +385,7 @@ class ACGANCifar10(BaseACGAN):
 
         features = layers.Flatten()(x)
 
-        disc = layers.Dense(1, name='discriminator')(features)
+        validity = layers.Dense(1, name='discriminator')(features)
         aux = layers.Dense(self.num_classes, name='auxiliary')(features)
 
-        return tf.keras.Model(image, [disc, aux])
+        return tf.keras.Model(image, [validity, aux])
