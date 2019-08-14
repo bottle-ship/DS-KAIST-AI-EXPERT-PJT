@@ -25,9 +25,9 @@ class BaseModel(BaseEstimator):
         raise NotImplementedError
 
     @abstractmethod
-    def save_model(self, model_dir_name=None):
+    def save_model(self, model_dir_name):
         raise NotImplementedError
 
     @abstractmethod
-    def load_model(self, model_dir_name=None):
+    def load_model(self, model_dir_name):
         raise NotImplementedError
