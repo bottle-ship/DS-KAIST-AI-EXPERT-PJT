@@ -4,8 +4,11 @@ import numpy as np
 import pandas as pd
 
 import tensorflow as tf
+import tensorflow.python.keras as keras
 
 from abc import abstractmethod
+from scipy import linalg
+from skimage.transform import resize
 from tensorflow.python.keras import layers
 from tensorflow.python.keras import losses
 from tensorflow.python.keras.utils import plot_model
@@ -54,6 +57,11 @@ class BaseACGAN(BaseModel):
 
         self.history = list()
 
+        self.inception_input_shape = (96, 96, 3)
+        self.inception = keras.applications.InceptionV3(
+            include_top=False, pooling='avg', input_shape=self.inception_input_shape
+        )
+
     def _initialize(self):
         self.input_channel_ = self.input_shape[-1]
         self.history.clear()
@@ -85,6 +93,25 @@ class BaseACGAN(BaseModel):
                 "Mismatch input shape(%s) and generator output shape(%s)" %
                 (self.input_shape, self._gene.output_shape[1:])
             )
+
+    def _resize_image_for_fid(self, images):
+        return np.asarray([resize(image, self.inception_input_shape, 0) for image in images])
+
+    def _compute_fid(self, real_images, fake_images):
+        #  https://stackoverflow.com/questions/55421153/fr%c3%a9chet-inception-distance-parameters-choice-in-tensorflow
+        real_images = self._resize_image_for_fid(real_images)
+        fake_images = self._resize_image_for_fid(fake_images)
+
+        f1, f2 = [self.inception.predict(im) for im in (real_images, fake_images)]
+        mean1, sigma1 = f1.mean(axis=0), np.cov(f1, rowvar=False)
+        mean2, sigma2 = f2.mean(axis=0), np.cov(f2, rowvar=False)
+        sum_sq_diff = np.sum((mean1 - mean2) ** 2)
+        cov_mean = linalg.sqrtm(sigma1.dot(sigma2))
+        if np.iscomplexobj(cov_mean):
+            cov_mean = cov_mean.real
+        fid = sum_sq_diff + np.trace(sigma1 + sigma2 - 2.0 * cov_mean)
+
+        return fid
 
     @abstractmethod
     def _build_generator(self):
@@ -159,6 +186,7 @@ class BaseACGAN(BaseModel):
         scaled_x = self._normalize_image(x)
 
         ds_train = tf.data.Dataset.from_tensor_slices((scaled_x, y)).shuffle(scaled_x.shape[0]).batch(self.batch_size)
+        ref_x_tr_batch = None
 
         random_vector = tf.random.normal([self.batch_size, self.noise_dim])
         random_cls = tf.random.uniform([self.batch_size, ], 0, self.num_classes, dtype=tf.dtypes.int32)
@@ -170,6 +198,9 @@ class BaseACGAN(BaseModel):
 
             tqdm_range = trange(int(np.ceil(x.shape[0] / self.batch_size)))
             for (x_tr_batch, y_tr_batch), _ in zip(ds_train, tqdm_range):
+                if ref_x_tr_batch is None:
+                    ref_x_tr_batch = x_tr_batch.numpy()
+
                 grad_disc, grad_gene, loss_disc, loss_gene = self._compute_gradients(
                     x_tr_batch, y_tr_batch
                 )
@@ -184,14 +215,14 @@ class BaseACGAN(BaseModel):
                 )
             tqdm_range.close()
 
-            self.history.append([epoch, np.array(epoch_loss_disc).mean(), np.array(epoch_loss_gene).mean()])
+            gene_img = self._gene([random_vector, test_cls_onehot], training=False).numpy()
+            gene_img = self._scale_image_to_0_to_1(gene_img)
+            fid = self._compute_fid(ref_x_tr_batch, gene_img)
+            print(fid)
+            self.history.append([epoch, np.array(epoch_loss_disc).mean(), np.array(epoch_loss_gene).mean(), fid])
 
             if log_dir is not None and epoch % log_period == 0:
                 self.save_model(model_dir_name=os.path.join(log_dir, 'epoch_%05d' % epoch))
-
-                gene_img = self._gene([random_vector, test_cls_onehot], training=False).numpy()
-                gene_img = self._scale_image_to_0_to_1(gene_img)
-
                 show_generated_image(gene_img, filename=os.path.join(log_dir, 'epoch_%05d.png' % epoch))
 
     def predict(self, label=None, n_gen_sample=25, plot=False, filename=None):
@@ -225,7 +256,7 @@ class BaseACGAN(BaseModel):
         save_model_to_json(self._disc, os.path.join(model_dir_name, 'discriminator_model.json'))
         self._disc.save_weights(os.path.join(model_dir_name, 'discriminator_weights.h5'))
 
-        pd.DataFrame(self.history, columns=['Epochs', 'Loss_Disc', 'Loss_Gene']).to_pickle(
+        pd.DataFrame(self.history, columns=['Epochs', 'Loss_Disc', 'Loss_Gene', 'FID']).to_pickle(
             os.path.join(model_dir_name, 'history.pkl')
         )
 
