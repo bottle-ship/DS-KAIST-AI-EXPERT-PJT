@@ -23,24 +23,25 @@ def show_image_from_dataset(x, y, class_names=None):
     plt.close()
 
 
-def show_generated_image(x, filename=None):
-    if x.shape[0] > 25:
-        x = x[:25]
-
+def show_generated_image(x, n_col=8, filename=None):
+    total_image = x.shape[0]
     img_channel = x.shape[-1]
+    n_row = int(np.ceil(x.shape[0] / n_col))
 
-    fig = plt.figure(figsize=(5, 5))
+    fig = plt.figure(figsize=(5 * (n_col / 8), 5 * (n_row / 8)))
+    fig.set_facecolor('k')
     ax = list()
 
-    for i in range(0, 25):
-        ax.append(fig.add_subplot(5, 5, i + 1))
+    for i in range(0, total_image):
+        ax.append(fig.add_subplot(n_row, n_col, i + 1))
         if img_channel == 1:
             ax[i].imshow(x[i, :, :, 0], cmap='gray')
         else:
             ax[i].imshow(x[i])
         ax[i].axis("off")
 
-    plt.subplots_adjust(wspace=0.1, hspace=0.0)
+    plt.subplots_adjust(wspace=0.0, hspace=0.0)
+    plt.tight_layout()
 
     if filename is not None:
         plt.savefig(filename)
