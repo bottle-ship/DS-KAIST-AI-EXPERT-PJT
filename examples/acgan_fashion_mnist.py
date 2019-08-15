@@ -16,8 +16,9 @@ if __name__ == '__main__':
         fake_activation='tanh',
         batch_size=64,
         learning_rate=1e-4,
-        beta_1=0.9,
-        epochs=15
+        adam_beta_1=0.9,
+        epochs=15,
+        n_fid_samples=0
     )
-    model.fit(x_train, y_train, log_dir='log_acgan_fashion_mnist', log_period=1)
+    model.fit(x_train, y_train, log_dir='log_acgan-fashion_mnist', log_period=1)
     model.predict(label=None, plot=True)

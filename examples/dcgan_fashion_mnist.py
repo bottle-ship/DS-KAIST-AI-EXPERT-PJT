@@ -14,9 +14,11 @@ if __name__ == '__main__':
         noise_dim=100,
         fake_activation='tanh',
         batch_size=64,
+        optimizer='adam',
         learning_rate=1e-4,
-        beta_1=0.9,
-        epochs=15
+        adam_beta_1=0.9,
+        epochs=15,
+        n_fid_samples=0
     )
-    model.fit(x_train, log_dir='log_dcgan_fashion_mnist', log_period=1)
+    model.fit(x_train, log_dir='log_dcgan-fashion_mnist', log_period=1)
     model.predict(plot=True)

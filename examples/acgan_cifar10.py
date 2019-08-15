@@ -15,9 +15,11 @@ if __name__ == '__main__':
         noise_dim=110,
         fake_activation='tanh',
         batch_size=64,
+        optimizer='adam',
         learning_rate=0.0002,
-        beta_1=0.5,
-        epochs=15
+        adam_beta_1=0.5,
+        epochs=15,
+        n_fid_samples=0
     )
-    model.fit(x_train, y_train, log_dir='log_cifar10', log_period=1)
+    model.fit(x_train, y_train, log_dir='log_acgan-cifar10', log_period=1)
     model.predict(label=None, plot=True)
