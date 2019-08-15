@@ -1,5 +1,5 @@
 from transfer_gan.datasets import DatasetLoader
-from transfer_gan.models.acgan import ACGANCifar10
+from transfer_gan.models.dcgan import DCGANCifar10
 from transfer_gan.utils.data_utils import get_data_information
 
 
@@ -7,11 +7,10 @@ if __name__ == '__main__':
     loader = DatasetLoader()
     (x_train, y_train), (x_test, y_test), class_names = loader.load_cifar10()
 
-    input_shape, num_classes = get_data_information(x_train, y_train)
+    input_shape, _ = get_data_information(x_train, y_train)
 
-    model = ACGANCifar10(
+    model = DCGANCifar10(
         input_shape=input_shape,
-        num_classes=num_classes,
         noise_dim=110,
         fake_activation='tanh',
         batch_size=64,
@@ -22,5 +21,5 @@ if __name__ == '__main__':
         n_fid_samples=5000,
         tf_verbose=False
     )
-    model.fit(x_train, y_train, log_dir='log_acgan-cifar10', log_period=1)
-    model.predict(label=None, plot=True)
+    model.fit(x_train, log_dir='log_dcgan-cifar10', log_period=1)
+    model.predict(plot=True)

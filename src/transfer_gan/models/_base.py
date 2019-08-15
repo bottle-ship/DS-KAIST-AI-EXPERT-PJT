@@ -1,3 +1,5 @@
+import os
+
 import tensorflow as tf
 
 from abc import abstractmethod
@@ -7,14 +9,27 @@ from tensorflow.python.keras import backend
 
 class BaseModel(BaseEstimator):
 
-    def __init__(self):
+    def __init__(self, tf_verbose):
         super(BaseModel, self).__init__()
 
-        tf.enable_eager_execution()
+        if not tf_verbose:
+            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-        config = tf.ConfigProto()
-        config.gpu_options.allow_growth = True
-        backend.set_session(tf.Session(config=config))
+        tf.compat.v1.enable_eager_execution()
+        self.config = tf.compat.v1.ConfigProto()
+        self.config.gpu_options.allow_growth = True
+
+        self._session = None
+        self._create_session()
+
+    def _create_session(self):
+        self._session = tf.compat.v1.Session(config=self.config)
+        backend.set_session(self._session)
+
+    def _delete_session(self):
+        backend.clear_session()
+        self._session.__del__()
+        self._session = None
 
     @abstractmethod
     def fit(self, x, y, **kwargs):
