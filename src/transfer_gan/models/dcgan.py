@@ -12,7 +12,6 @@ from ..utils.os_utils import make_directory
 from ..utils.visualization import show_generated_image
 
 from ._base_gan import BaseGAN
-from ._base_gan import compute_fid
 
 
 class BaseDCGAN(BaseGAN):
@@ -90,12 +89,6 @@ class BaseDCGAN(BaseGAN):
     def _apply_gradients_generator(self, grad_generator):
         self._gene_optimizer.apply_gradients(zip(grad_generator, self._gene.trainable_variables))
 
-    def _random_sampling_from_real_data(self, x):
-        idx = np.random.randint(0, x.shape[0], self.n_fid_samples)
-        x = x[idx]
-
-        return x
-
     def _set_random_noise(self, n_image=None):
         if n_image is None:
             n_image = self.batch_size
@@ -108,18 +101,16 @@ class BaseDCGAN(BaseGAN):
         self._initialize()
 
         if log_dir is not None:
-            make_directory(log_dir, time_suffix=True)
+            log_dir = make_directory(log_dir, time_suffix=True)
 
         scaled_x = self._scaling_image(x)
 
         if self.n_fid_samples > 0:
-            selected_images = self._random_sampling_from_real_data(scaled_x)
             fid_random_noise = tf.random.normal([self.n_fid_samples, self.noise_dim])
-            real_mean, real_cov = self._compute_image_mean_and_cov(selected_images)
+            selected_images = self._random_sampling_from_real_data(scaled_x)
+            self._fid.compute_real_image_mean_and_cov(selected_images)
         else:
             fid_random_noise = None
-            real_mean = None
-            real_cov = None
 
         ds_train = tf.data.Dataset.from_tensor_slices(scaled_x).shuffle(scaled_x.shape[0]).batch(self.batch_size)
 
@@ -129,8 +120,12 @@ class BaseDCGAN(BaseGAN):
             epoch_loss_disc = list()
             epoch_loss_gene = list()
 
-            tqdm_range = trange(int(np.ceil(x.shape[0] / self.batch_size)))
+            fid = '-'
+            iterations = int(np.ceil(x.shape[0] / self.batch_size))
+            tqdm_range = trange(iterations)
+            iter_cnt = 0
             for x_tr_batch, _ in zip(ds_train, tqdm_range):
+                iter_cnt += 1
                 grad_disc, grad_gene, loss_disc, loss_gene = self._compute_gradients(x_tr_batch)
                 self._apply_gradients_discriminator(grad_disc)
                 self._apply_gradients_generator(grad_gene)
@@ -138,19 +133,15 @@ class BaseDCGAN(BaseGAN):
                 epoch_loss_disc.append(loss_disc)
                 epoch_loss_gene.append(loss_gene)
 
+                if iterations == iter_cnt and self.n_fid_samples > 0:
+                    fid_generated_images = self._get_generated_image_for_fid(fid_random_noise)
+                    fid = self._compute_frechet_inception_distance(fid_generated_images)
+
                 tqdm_range.set_postfix_str(
-                    "[Epoch] %05d [Loss Disc] %.3f [Loss Gene] %.3f" %
-                    (epoch, np.array(epoch_loss_disc).mean(), np.array(epoch_loss_gene).mean())
+                    "[Epoch] %05d [Loss Disc] %.3f [Loss Gene] %.3f [FID] %s" %
+                    (epoch, np.array(epoch_loss_disc).mean(), np.array(epoch_loss_gene).mean(), fid)
                 )
             tqdm_range.close()
-
-            if self.n_fid_samples > 0:
-                fid_gene_images = self._gene(fid_random_noise, training=False).numpy()
-                fid_fake_mean, fid_fake_cov = self._compute_image_mean_and_cov(fid_gene_images)
-                fid = compute_fid(real_mean, real_cov, fid_fake_mean, fid_fake_cov)
-                print("FID: %.2f" % fid)
-            else:
-                fid = '-'
 
             self.history.append([epoch, np.array(epoch_loss_disc).mean(), np.array(epoch_loss_gene).mean(), fid])
 
@@ -158,7 +149,7 @@ class BaseDCGAN(BaseGAN):
                 self.save_model(model_dir_name=os.path.join(log_dir, 'epoch_%05d' % epoch))
                 gene_img = self._gene(random_noise, training=False).numpy()
                 gene_img = self._unscaling_image(gene_img)
-                show_generated_image(gene_img, filename=os.path.join(log_dir, 'epoch_%05d.png' % epoch))
+                show_generated_image(gene_img, filename=os.path.join(log_dir, 'epoch_%05d_fid_%s.png' % (epoch, fid)))
 
     def predict(self, n_image=25, plot=False, filename=None):
         random_noise = self._set_random_noise(n_image=n_image)
