@@ -18,15 +18,15 @@ class BaseDCGAN(BaseGAN):
 
     def __init__(self, input_shape,
                  noise_dim,
-                 fake_activation='tanh',
-                 optimizer='adam',
-                 learning_rate=1e-4,
-                 adam_beta_1=0.9,
-                 adam_beta_2=0.999,
-                 batch_size=64,
-                 epochs=15,
-                 n_fid_samples=5000,
-                 **kwargs):
+                 fake_activation,
+                 optimizer,
+                 learning_rate,
+                 adam_beta_1,
+                 adam_beta_2,
+                 batch_size,
+                 epochs,
+                 n_fid_samples,
+                 tf_verbose):
         super(BaseDCGAN, self).__init__(
             input_shape=input_shape,
             noise_dim=noise_dim,
@@ -38,7 +38,7 @@ class BaseDCGAN(BaseGAN):
             batch_size=batch_size,
             epochs=epochs,
             n_fid_samples=n_fid_samples,
-            **kwargs
+            tf_verbose=tf_verbose
         )
 
     @abstractmethod
@@ -175,6 +175,7 @@ class DCGANFashionMnist(BaseDCGAN):
                  batch_size=64,
                  epochs=15,
                  n_fid_samples=5000,
+                 tf_verbose=True,
                  **kwargs):
         super(DCGANFashionMnist, self).__init__(
             input_shape=input_shape,
@@ -187,8 +188,9 @@ class DCGANFashionMnist(BaseDCGAN):
             batch_size=batch_size,
             epochs=epochs,
             n_fid_samples=n_fid_samples,
-            **kwargs
+            tf_verbose=tf_verbose
         )
+        self.kwargs = kwargs
 
     def _build_generator(self):
         inputs = layers.Input(shape=(self.noise_dim,))

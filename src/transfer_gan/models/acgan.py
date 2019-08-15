@@ -27,8 +27,7 @@ class BaseACGAN(BaseGAN):
                  batch_size,
                  epochs,
                  n_fid_samples,
-                 tf_verbose=True,
-                 **kwargs):
+                 tf_verbose):
         self.num_classes = num_classes
 
         super(BaseACGAN, self).__init__(
@@ -210,6 +209,7 @@ class ACGANFashionMnist(BaseACGAN):
                  batch_size=64,
                  epochs=15,
                  n_fid_samples=5000,
+                 tf_verbose=True,
                  **kwargs):
         super(ACGANFashionMnist, self).__init__(
             input_shape=input_shape,
@@ -223,8 +223,9 @@ class ACGANFashionMnist(BaseACGAN):
             batch_size=batch_size,
             epochs=epochs,
             n_fid_samples=n_fid_samples,
-            **kwargs
+            tf_verbose=tf_verbose
         )
+        self.kwargs = kwargs
 
     def _build_generator(self):
         z = layers.Input(shape=(self.noise_dim,))
@@ -286,6 +287,7 @@ class ACGANCifar10(BaseACGAN):
                  batch_size=64,
                  epochs=15,
                  n_fid_samples=5000,
+                 tf_verbose=True,
                  **kwargs):
         super(ACGANCifar10, self).__init__(
             input_shape=input_shape,
@@ -299,8 +301,9 @@ class ACGANCifar10(BaseACGAN):
             batch_size=batch_size,
             epochs=epochs,
             n_fid_samples=n_fid_samples,
-            **kwargs
+            tf_verbose=tf_verbose
         )
+        self.kwargs = kwargs
 
     def _build_generator(self):
         z = layers.Input(shape=(self.noise_dim,))
