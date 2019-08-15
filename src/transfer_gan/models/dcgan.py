@@ -108,7 +108,7 @@ class BaseDCGAN(BaseGAN):
         self._initialize()
 
         if log_dir is not None:
-            make_directory(log_dir)
+            make_directory(log_dir, time_suffix=True)
 
         scaled_x = self._scaling_image(x)
 

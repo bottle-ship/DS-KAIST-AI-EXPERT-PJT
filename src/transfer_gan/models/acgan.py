@@ -139,14 +139,19 @@ class BaseACGAN(BaseGAN):
         self._initialize()
 
         if log_dir is not None:
-            make_directory(log_dir)
+            make_directory(log_dir, time_suffix=True)
 
         scaled_x = self._scaling_image(x)
 
-        selected_images, selected_onehot = self._random_sampling_from_real_data(scaled_x, y)
-        fid_random_noise = tf.random.normal([self.n_fid_samples, self.noise_dim])
-
-        real_mean, real_cov = self._compute_image_mean_and_cov(selected_images)
+        if self.n_fid_samples > 0:
+            selected_images, selected_onehot = self._random_sampling_from_real_data(scaled_x, y)
+            fid_random_noise = tf.random.normal([self.n_fid_samples, self.noise_dim])
+            real_mean, real_cov = self._compute_image_mean_and_cov(selected_images)
+        else:
+            selected_onehot = None
+            fid_random_noise = None
+            real_mean = None
+            real_cov = None
 
         ds_train = tf.data.Dataset.from_tensor_slices((scaled_x, y)).shuffle(scaled_x.shape[0]).batch(self.batch_size)
 
@@ -173,11 +178,13 @@ class BaseACGAN(BaseGAN):
                 )
             tqdm_range.close()
 
-            fid_gene_images = self._gene([fid_random_noise, selected_onehot], training=False).numpy()
-            fid_fake_mean, fid_fake_cov = self._compute_image_mean_and_cov(fid_gene_images)
-
-            fid = compute_fid(real_mean, real_cov, fid_fake_mean, fid_fake_cov)
-            print("FID: %.2f" % fid)
+            if self.n_fid_samples > 0:
+                fid_gene_images = self._gene([fid_random_noise, selected_onehot], training=False).numpy()
+                fid_fake_mean, fid_fake_cov = self._compute_image_mean_and_cov(fid_gene_images)
+                fid = compute_fid(real_mean, real_cov, fid_fake_mean, fid_fake_cov)
+                print("FID: %.2f" % fid)
+            else:
+                fid = '-'
 
             self.history.append([epoch, np.array(epoch_loss_disc).mean(), np.array(epoch_loss_gene).mean(), fid])
 
