@@ -12,9 +12,9 @@ class BaseModel(BaseEstimator):
 
         tf.enable_eager_execution()
 
-        config = tf.ConfigProto()
+        config = tf.compat.v1.ConfigProto()
         config.gpu_options.allow_growth = True
-        backend.set_session(tf.Session(config=config))
+        backend.set_session(tf.compat.v1.Session(config=config))
 
     @abstractmethod
     def fit(self, x, y, **kwargs):
