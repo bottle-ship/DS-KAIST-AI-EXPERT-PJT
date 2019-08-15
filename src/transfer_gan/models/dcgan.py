@@ -233,3 +233,75 @@ class DCGANFashionMnist(BaseDCGAN):
         validity = layers.Dense(1, name='discriminator')(features)
 
         return tf.keras.Model(image, validity)
+
+
+class DCGANCifar10(BaseDCGAN):
+
+    def __init__(self, input_shape,
+                 noise_dim,
+                 fake_activation='tanh',
+                 optimizer='adam',
+                 learning_rate=1e-4,
+                 adam_beta_1=0.9,
+                 adam_beta_2=0.999,
+                 batch_size=64,
+                 epochs=15,
+                 n_fid_samples=5000,
+                 tf_verbose=True,
+                 **kwargs):
+        super(DCGANCifar10, self).__init__(
+            input_shape=input_shape,
+            noise_dim=noise_dim,
+            fake_activation=fake_activation,
+            optimizer=optimizer,
+            learning_rate=learning_rate,
+            adam_beta_1=adam_beta_1,
+            adam_beta_2=adam_beta_2,
+            batch_size=batch_size,
+            epochs=epochs,
+            n_fid_samples=n_fid_samples,
+            tf_verbose=tf_verbose
+        )
+        self.kwargs = kwargs
+
+    def _build_generator(self):
+        inputs = layers.Input(shape=(self.noise_dim,))
+
+        x = layers.Dense(8 * 8 * 256, use_bias=False)(inputs)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+        x = layers.Reshape((8, 8, 256))(x)
+
+        x = layers.Conv2DTranspose(128, (5, 5), strides=(1, 1), padding='same', use_bias=False)(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+
+        x = layers.Conv2DTranspose(64, (5, 5), strides=(2, 2), padding='same', use_bias=False)(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+
+        x = layers.Conv2DTranspose(self.input_channel_, (5, 5), strides=(2, 2), padding='same', use_bias=False)(x)
+
+        fake = layers.Activation(self.fake_activation)(x)
+
+        return tf.keras.Model(inputs, fake)
+
+    def _build_discriminator(self):
+        image = layers.Input(shape=self.input_shape)
+
+        x = layers.Conv2D(64, (5, 5), strides=(2, 2), padding='same', use_bias=False)(image)
+        x = layers.LeakyReLU(alpha=0.2)(x)
+
+        x = layers.Conv2D(128, (5, 5), strides=(2, 2), padding='same', use_bias=False)(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.LeakyReLU(alpha=0.2)(x)
+
+        x = layers.Conv2D(256, (5, 5), strides=(2, 2), padding='same', use_bias=False)(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.LeakyReLU(alpha=0.2)(x)
+
+        features = layers.Flatten()(x)
+
+        validity = layers.Dense(1, name='discriminator')(features)
+
+        return tf.keras.Model(image, validity)
