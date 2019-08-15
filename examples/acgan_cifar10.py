@@ -19,7 +19,8 @@ if __name__ == '__main__':
         learning_rate=0.0002,
         adam_beta_1=0.5,
         epochs=15,
-        n_fid_samples=0
+        n_fid_samples=5000,
+        tf_verbose=False
     )
     model.fit(x_train, y_train, log_dir='log_acgan-cifar10', log_period=1)
     model.predict(label=None, plot=True)
