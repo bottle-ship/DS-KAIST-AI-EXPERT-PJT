@@ -68,8 +68,8 @@ class BaseACGAN(BaseGAN):
 
         raise self
 
-    def predict(self, n_images=25, plot=False, filename=None):
-        raise self._predict(n_images=n_images, plot=plot, filename=filename)
+    def predict(self, n_images=25, label=None, plot=False, filename=None):
+        raise self._predict_with_label(n_images=n_images, label=label, plot=plot, filename=filename)
 
 
 class ACGANFashionMnist(BaseACGAN):

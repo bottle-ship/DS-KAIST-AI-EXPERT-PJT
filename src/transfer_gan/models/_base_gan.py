@@ -1,86 +1,22 @@
 import os
 
+import datetime
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 
 from abc import abstractmethod
-from scipy import linalg
-from skimage.transform import resize
-from tensorflow.python.keras import backend
 from tensorflow.python.keras import losses
-from tensorflow.python.keras.applications.inception_v3 import InceptionV3
 from tensorflow.python.keras.utils import plot_model
 from tqdm import trange
 
+from ..metrics.fid import create_realdata_stats, fid_with_realdata_stats
 from ..utils.keras_utils import load_model_from_json, save_model_to_json
 from ..utils.os_utils import make_directory
 from ..utils.pickle_utils import load_from_pickle, save_to_pickle
 from ..utils.visualization import show_generated_image
 
 from ._base import BaseModel
-
-
-class _FrechetInceptionDistance(object):
-    #  https://stackoverflow.com/questions/55421153/fr%c3%a9chet-inception-distance-parameters-choice-in-tensorflow
-
-    def __init__(self, inception_input_shape=(96, 96, 3),
-                 batch_size=500):
-        self.inception_input_shape = inception_input_shape
-        self.batch_size = batch_size
-
-        self._real_mean = None
-        self._real_cov = None
-
-    def _predict_inception(self, images):
-        config = tf.compat.v1.ConfigProto()
-        config.gpu_options.allow_growth = True
-        inception_sess = tf.compat.v1.Session(config=config)
-        backend.set_session(inception_sess)
-
-        images = np.asarray([resize(image, self.inception_input_shape, 0) for image in images])
-
-        inception = InceptionV3(include_top=False, pooling='avg', input_shape=self.inception_input_shape)
-
-        outputs = None
-        while images.shape[0] > 0:
-            images_batch = images[:self.batch_size]
-            images = images[self.batch_size:]
-            outputs_batch = inception.predict(images_batch)
-
-            if outputs is None:
-                outputs = outputs_batch
-            else:
-                outputs = np.vstack((outputs, outputs_batch))
-
-        inception_sess.__del__()
-
-        return outputs
-
-    def initialize(self):
-        self._real_mean = None
-        self._real_cov = None
-
-    def compute_real_image_mean_and_cov(self, real_images):
-        outputs = self._predict_inception(real_images)
-        self._real_mean = outputs.mean(axis=0)
-        self._real_cov = np.cov(outputs, rowvar=False)
-
-    def compute_fid(self, fake_images):
-        if self._real_mean is not None and self._real_cov is not None:
-            outputs = self._predict_inception(fake_images)
-            fake_mean = outputs.mean(axis=0)
-            fake_cov = np.cov(outputs, rowvar=False)
-
-            sum_sq_diff = np.sum((self._real_mean - fake_mean) ** 2)
-            cov_mean = linalg.sqrtm(self._real_cov.dot(fake_cov))
-            if np.iscomplexobj(cov_mean):
-                cov_mean = cov_mean.real
-            fid = sum_sq_diff + np.trace(self._real_cov + fake_cov - 2.0 * cov_mean)
-
-            return fid
-        else:
-            assert "You must run 'compute_real_image_mean_and_cov' method first."
 
 
 class BaseGAN(BaseModel):
@@ -122,7 +58,7 @@ class BaseGAN(BaseModel):
         self._gene_optimizer = self._set_optimizer()
         self._disc_optimizer = self._set_optimizer()
 
-        self._fid = _FrechetInceptionDistance(inception_input_shape=(96, 96, 3), batch_size=500)
+        self._fid_stats_path = './fid_stats' + datetime.datetime.now().strftime("_%Y%m%d-%H%M%S") + '.npz'
 
         self.history = list()
 
@@ -296,8 +232,7 @@ class BaseGAN(BaseModel):
             random_noise_set = tf.data.Dataset.from_tensor_slices(noise).batch(self.batch_size)
             for noise_batch in random_noise_set:
                 generated_images_batch = self._gene(noise_batch, training=False).numpy()
-                if self.fake_activation == 'tanh':
-                    generated_images_batch = generated_images_batch / 2 + 0.5
+                generated_images_batch = self._unscaling_image(generated_images_batch)
                 if generated_images is None:
                     generated_images = generated_images_batch
                 else:
@@ -306,8 +241,7 @@ class BaseGAN(BaseModel):
             random_noise_set = tf.data.Dataset.from_tensor_slices((noise, onehot)).batch(self.batch_size)
             for noise_batch, onehot_batch in random_noise_set:
                 generated_images_batch = self._gene([noise_batch, onehot_batch], training=False).numpy()
-                if self.fake_activation == 'tanh':
-                    generated_images_batch = generated_images_batch / 2 + 0.5
+                generated_images_batch = self._unscaling_image(generated_images_batch)
                 if generated_images is None:
                     generated_images = generated_images_batch
                 else:
@@ -315,39 +249,31 @@ class BaseGAN(BaseModel):
 
         return generated_images
 
-    def _compute_frechet_inception_distance(self, fake_images):
-        current_gene_weights = self._gene.get_weights()
-        current_disc_weights = self._disc.get_weights()
-        self._delete_session()
-        fid = '%.2f' % self._fid.compute_fid(fake_images)
-        self._create_session()
-        self._gene = self._build_generator()
-        self._gene.set_weights(current_gene_weights)
-        self._disc = self._build_discriminator()
-        self._disc.set_weights(current_disc_weights)
-
-        return fid
-
     def _fit(self, x, y=None, log_dir=None, log_period=5):
+        if y is None:
+            flag_conditional = False
+        else:
+            flag_conditional = True
+
         self._initialize()
 
         if log_dir is not None:
             log_dir = make_directory(log_dir, time_suffix=True)
 
+        if self.n_fid_samples > 0:
+            if self.input_channel_ == 1:
+                create_realdata_stats(np.repeat(x, 3, axis=3), self._fid_stats_path)
+            else:
+                create_realdata_stats(x, self._fid_stats_path)
+
+        fid_random_noise = self._get_random_noise(n_images=self.n_fid_samples)
+        _, fid_random_onehot = self._get_random_label_and_onehot(n_images=self.n_fid_samples, label=None)
+
         scaled_x = self._scaling_image(x)
 
-        if self.n_fid_samples > 0:
-            fid_random_noise = self._get_random_noise(n_images=self.n_fid_samples)
-            selected_images, selected_onehot = self._get_random_sample_from_real_data(scaled_x, y, self.num_classes)
-            self._fid.compute_real_image_mean_and_cov(selected_images)
-        else:
-            fid_random_noise = None
-            selected_onehot = None
-
-        if y is None:
+        if not flag_conditional:
             y = np.empty((x.shape[0], ))
         ds_train = tf.data.Dataset.from_tensor_slices((scaled_x, y)).shuffle(scaled_x.shape[0]).batch(self.batch_size)
-        y = None
 
         ref_random_noise = self._get_random_noise()
         _, ref_random_onehot = self._get_random_label_and_onehot()
@@ -364,7 +290,7 @@ class BaseGAN(BaseModel):
             for (x_tr_batch, y_tr_batch), _ in zip(ds_train, tqdm_range):
                 iter_cnt += 1
 
-                if y is None:
+                if not flag_conditional:
                     grad_disc, grad_gene, loss_disc, loss_gene = self._compute_gradients(x=x_tr_batch, y=None)
                 else:
                     grad_disc, grad_gene, loss_disc, loss_gene = self._compute_gradients(x=x_tr_batch, y=y_tr_batch)
@@ -385,8 +311,10 @@ class BaseGAN(BaseModel):
                     epoch_loss_gene.append(loss_gene)
 
                 if iterations == iter_cnt and self.n_fid_samples > 0:
-                    fid_generated_images = self._get_generated_image_for_fid(fid_random_noise, selected_onehot)
-                    fid = self._compute_frechet_inception_distance(fid_generated_images)
+                    fid_generated_images = self._get_generated_image_for_fid(fid_random_noise, fid_random_onehot)
+                    if self.input_channel_ == 1:
+                        fid_generated_images = np.repeat(fid_generated_images, 3, axis=3)
+                    fid = fid_with_realdata_stats(fid_generated_images, self._fid_stats_path)
 
                 if iter_cnt < self.period_update_gene:
                     tqdm_range.set_postfix_str(
@@ -404,7 +332,7 @@ class BaseGAN(BaseModel):
 
             if log_dir is not None and epoch % log_period == 0:
                 self.save_model(model_dir_name=os.path.join(log_dir, 'epoch_%05d' % epoch))
-                if y is None:
+                if not flag_conditional:
                     gene_img = self._gene(ref_random_noise, training=False).numpy()
                 else:
                     gene_img = self._gene([ref_random_noise, ref_random_onehot], training=False).numpy()
