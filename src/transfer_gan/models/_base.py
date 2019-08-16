@@ -18,6 +18,7 @@ class BaseModel(BaseEstimator):
         tf.compat.v1.enable_eager_execution()
         self.config = tf.compat.v1.ConfigProto()
         self.config.gpu_options.allow_growth = True
+        self.config.gpu_options.per_process_gpu_memory_fraction = 0.333
 
         self._session = None
         self._create_session()
