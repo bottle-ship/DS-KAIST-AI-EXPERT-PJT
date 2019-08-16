@@ -194,6 +194,8 @@ class BaseGAN(BaseModel):
             random_noise_set = tf.data.Dataset.from_tensor_slices(noise).batch(self.batch_size)
             for noise_batch in random_noise_set:
                 generated_images_batch = self._gene(noise_batch, training=False).numpy()
+                if self.fake_activation == 'tanh':
+                    generated_images_batch = generated_images_batch / 2 + 0.5
                 if generated_images is None:
                     generated_images = generated_images_batch
                 else:
@@ -202,6 +204,8 @@ class BaseGAN(BaseModel):
             random_noise_set = tf.data.Dataset.from_tensor_slices((noise, onehot)).batch(self.batch_size)
             for noise_batch, onehot_batch in random_noise_set:
                 generated_images_batch = self._gene([noise_batch, onehot_batch], training=False).numpy()
+                if self.fake_activation == 'tanh':
+                    generated_images_batch = generated_images_batch / 2 + 0.5
                 if generated_images is None:
                     generated_images = generated_images_batch
                 else:
