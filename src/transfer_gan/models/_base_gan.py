@@ -314,7 +314,7 @@ class BaseGAN(BaseModel):
                     fid_generated_images = self._get_generated_image_for_fid(fid_random_noise, fid_random_onehot)
                     if self.input_channel_ == 1:
                         fid_generated_images = np.repeat(fid_generated_images, 3, axis=3)
-                    fid = fid_with_realdata_stats(fid_generated_images, self._fid_stats_path)
+                    fid = '%.2f' % fid_with_realdata_stats(fid_generated_images, self._fid_stats_path)
 
                 if iter_cnt < self.period_update_gene:
                     tqdm_range.set_postfix_str(
