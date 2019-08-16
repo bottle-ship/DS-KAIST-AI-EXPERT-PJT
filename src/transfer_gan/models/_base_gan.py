@@ -8,12 +8,15 @@ from abc import abstractmethod
 from scipy import linalg
 from skimage.transform import resize
 from tensorflow.python.keras import backend
+from tensorflow.python.keras import losses
 from tensorflow.python.keras.applications.inception_v3 import InceptionV3
 from tensorflow.python.keras.utils import plot_model
+from tqdm import trange
 
 from ..utils.keras_utils import load_model_from_json, save_model_to_json
 from ..utils.os_utils import make_directory
 from ..utils.pickle_utils import load_from_pickle, save_to_pickle
+from ..utils.visualization import show_generated_image
 
 from ._base import BaseModel
 
@@ -84,27 +87,31 @@ class BaseGAN(BaseModel):
 
     def __init__(self, input_shape,
                  noise_dim,
+                 num_classes,
+                 batch_size,
                  fake_activation,
                  optimizer,
                  learning_rate,
-                 adam_beta_1,
-                 adam_beta_2,
-                 batch_size,
+                 disc_clip_value,
                  epochs,
+                 period_update_gene,
                  n_fid_samples,
-                 tf_verbose):
+                 tf_verbose,
+                 **kwargs):
         super(BaseGAN, self).__init__(tf_verbose)
 
         self.input_shape = input_shape
         self.noise_dim = noise_dim
+        self.num_classes = num_classes
+        self.batch_size = batch_size
         self.fake_activation = fake_activation
         self.optimizer = optimizer
         self.learning_rate = learning_rate
-        self.adam_beta_1 = adam_beta_1
-        self.adam_beta_2 = adam_beta_2
-        self.batch_size = batch_size
+        self.disc_clip_value = disc_clip_value
         self.epochs = epochs
+        self.period_update_gene = period_update_gene
         self.n_fid_samples = n_fid_samples
+        self.kwargs = kwargs
 
         self.input_channel_ = self.input_shape[-1]
 
@@ -149,6 +156,13 @@ class BaseGAN(BaseModel):
 
         return x
 
+    def _validate_generator_output_shape(self):
+        if not self.input_shape == self._gene.output_shape[1:]:
+            raise ValueError(
+                "Mismatch input shape(%s) and generator output shape(%s)" %
+                (self.input_shape, self._gene.output_shape[1:])
+            )
+
     @abstractmethod
     def _build_generator(self):
         raise NotImplementedError
@@ -157,30 +171,95 @@ class BaseGAN(BaseModel):
     def _build_discriminator(self):
         raise NotImplementedError
 
-    def _validate_generator_output_shape(self):
-        if not self.input_shape == self._gene.output_shape[1:]:
-            raise ValueError(
-                "Mismatch input shape(%s) and generator output shape(%s)" %
-                (self.input_shape, self._gene.output_shape[1:])
-            )
+    @abstractmethod
+    def _compute_loss_generator(self):
+        raise NotImplementedError
+
+    @abstractmethod
+    def _compute_loss_discriminator(self, x, y):
+        raise NotImplementedError
+
+    @staticmethod
+    def _compute_loss_class(y_onehot, y_label, y_fake_onehot, y_fake_label):
+        loss_class_real = losses.CategoricalCrossentropy(from_logits=True)(y_onehot, y_label)
+        loss_class_fake = losses.CategoricalCrossentropy(from_logits=True)(y_fake_onehot, y_fake_label)
+        loss_class = loss_class_real + loss_class_fake
+
+        return loss_class
+
+    def _compute_gradients(self, x, y=None):
+        with tf.GradientTape() as discriminator_tape, tf.GradientTape() as generator_tape:
+            loss_discriminator = self._compute_loss_discriminator(x, y)
+            loss_generator = self._compute_loss_generator()
+
+            grad_discriminator = discriminator_tape.gradient(loss_discriminator, self._disc.trainable_variables)
+            grad_generator = generator_tape.gradient(loss_generator, self._gene.trainable_variables)
+
+        return grad_discriminator, grad_generator, loss_discriminator, loss_generator
+
+    def _apply_gradients_discriminator(self, grad_discriminator):
+        self._disc_optimizer.apply_gradients(zip(grad_discriminator, self._disc.trainable_variables))
+
+    def _apply_gradients_generator(self, grad_generator):
+        self._gene_optimizer.apply_gradients(zip(grad_generator, self._gene.trainable_variables))
 
     def _set_optimizer(self):
         if self.optimizer.lower() == 'adam':
+            beta_1 = 0.9
+            if 'adam_beta_1' in self.kwargs.keys():
+                beta_1 = self.kwargs['adam_beta_1']
+
+            beta_2 = 0.999
+            if 'adam_beta_2' in self.kwargs.keys():
+                beta_1 = self.kwargs['adam_beta_2']
+
             optimizer = tf.keras.optimizers.Adam(
-                lr=self.learning_rate, beta_1=self.adam_beta_1, beta_2=self.adam_beta_2
+                lr=self.learning_rate, beta_1=beta_1, beta_2=beta_2
+            )
+        elif self.optimizer.lower() == 'rmsprop':
+            optimizer = tf.keras.optimizers.RMSprop(
+                learning_rate=self.learning_rate
             )
         else:
             raise ValueError("The optimizer '%s' is not supported." % self.optimizer)
 
         return optimizer
 
-    def _random_sampling_from_real_data(self, x, y=None, num_classes=None):
+    def _get_random_noise(self, n_images=None):
+        if n_images is None:
+            n_images = self.batch_size
+
+        random_noise = tf.random.normal([n_images, self.noise_dim])
+
+        return random_noise
+
+    def _get_random_label_and_onehot(self, n_images=None, label=None):
+        if self.num_classes is not None:
+            if n_images is None:
+                n_images = self.batch_size
+
+            if label is None:
+                min_label = 0
+                max_label = self.num_classes
+            else:
+                min_label = label
+                max_label = label + 1
+
+            random_label = tf.random.uniform([n_images, ], min_label, max_label, dtype=tf.dtypes.int32)
+            random_onehot = tf.keras.utils.to_categorical(random_label, self.num_classes)
+        else:
+            random_label = None
+            random_onehot = None
+
+        return random_label, random_onehot
+
+    def _get_random_sample_from_real_data(self, x, y=None, num_classes=None):
         idx = np.random.randint(0, x.shape[0], self.n_fid_samples)
         x = x[idx]
 
         if y is None:
 
-            return x
+            return x, None
         else:
             y = y[idx]
             selected_label = tf.convert_to_tensor(y, dtype=tf.dtypes.int32)
@@ -226,8 +305,110 @@ class BaseGAN(BaseModel):
 
         return fid
 
+    def _fit(self, x, y=None, log_dir=None, log_period=5):
+        self._initialize()
+
+        if log_dir is not None:
+            log_dir = make_directory(log_dir, time_suffix=True)
+
+        scaled_x = self._scaling_image(x)
+
+        if self.n_fid_samples > 0:
+            fid_random_noise = self._get_random_noise(n_images=self.n_fid_samples)
+            selected_images, selected_onehot = self._get_random_sample_from_real_data(scaled_x, y, self.num_classes)
+            self._fid.compute_real_image_mean_and_cov(selected_images)
+        else:
+            fid_random_noise = None
+            selected_onehot = None
+
+        ds_train = tf.data.Dataset.from_tensor_slices(scaled_x).shuffle(scaled_x.shape[0]).batch(self.batch_size)
+        ref_random_noise = self._get_random_noise()
+        _, ref_random_onehot = self._get_random_label_and_onehot()
+
+        for epoch in range(1, self.epochs + 1):
+            epoch_loss_disc = list()
+            epoch_loss_gene = list()
+
+            fid = '-'
+            iterations = int(np.ceil(x.shape[0] / self.batch_size))
+            tqdm_range = trange(iterations)
+            iter_cnt = 0
+
+            for train_batch, _ in zip(ds_train, tqdm_range):
+                iter_cnt += 1
+
+                if y is None:
+                    grad_disc, grad_gene, loss_disc, loss_gene = self._compute_gradients(train_batch)
+                else:
+                    grad_disc, grad_gene, loss_disc, loss_gene = self._compute_gradients(train_batch[0], train_batch[1])
+
+                self._apply_gradients_discriminator(grad_disc)
+                epoch_loss_disc.append(loss_disc)
+
+                if self.disc_clip_value is not None:
+                    for layer in self._disc.layers:
+                        disc_weights = layer.get_weights()
+                        disc_weights = [
+                            np.clip(w, -1 * self.disc_clip_value, self.disc_clip_value) for w in disc_weights
+                        ]
+                        layer.set_weights(disc_weights)
+
+                if iter_cnt % self.period_update_gene == 0:
+                    self._apply_gradients_generator(grad_gene)
+                    epoch_loss_gene.append(loss_gene)
+
+                if iterations == iter_cnt and self.n_fid_samples > 0:
+                    fid_generated_images = self._get_generated_image_for_fid(fid_random_noise, selected_onehot)
+                    fid = self._compute_frechet_inception_distance(fid_generated_images)
+
+                if iter_cnt < self.period_update_gene:
+                    tqdm_range.set_postfix_str(
+                        "[Epoch] %05d [Loss Disc] %.3f [Loss Gene] - [FID] %s" %
+                        (epoch, np.array(epoch_loss_disc).mean(), fid)
+                    )
+                else:
+                    tqdm_range.set_postfix_str(
+                        "[Epoch] %05d [Loss Disc] %.3f [Loss Gene] %.3f [FID] %s" %
+                        (epoch, np.array(epoch_loss_disc).mean(), np.array(epoch_loss_gene).mean(), fid)
+                    )
+            tqdm_range.close()
+
+            self.history.append([epoch, np.array(epoch_loss_disc).mean(), np.array(epoch_loss_gene).mean(), fid])
+
+            if log_dir is not None and epoch % log_period == 0:
+                self.save_model(model_dir_name=os.path.join(log_dir, 'epoch_%05d' % epoch))
+                gene_img = self._gene(ref_random_noise, training=False).numpy()
+                gene_img = self._unscaling_image(gene_img)
+                show_generated_image(gene_img, filename=os.path.join(log_dir, 'epoch_%05d_fid_%s.png' % (epoch, fid)))
+
+    def _predict(self, n_images=25, plot=False, filename=None):
+        random_noise = self._get_random_noise(n_images=n_images)
+
+        gene_img = self._gene(random_noise, training=False).numpy()
+        gene_img = self._unscaling_image(gene_img)
+
+        if plot:
+            show_generated_image(gene_img, filename=filename)
+
+        return gene_img
+
+    def _predict_with_label(self, n_images=25, label=None, plot=False, filename=None):
+        if label is not None and label >= self.num_classes:
+            raise ValueError("The label must be < %d" % self.num_classes)
+
+        random_noise = self._get_random_noise(n_images=n_images)
+        random_label, random_onehot = self._get_random_label_and_onehot(n_images=n_images, label=label)
+
+        gene_img = self._gene([random_noise, random_onehot], training=False).numpy()
+        gene_img = self._unscaling_image(gene_img)
+
+        if plot:
+            show_generated_image(gene_img, filename=filename)
+
+        return gene_img, random_label.numpy()
+
     @abstractmethod
-    def fit(self, x, y, **kwargs):
+    def fit(self, x, **kwargs):
         raise NotImplementedError
 
     @abstractmethod
