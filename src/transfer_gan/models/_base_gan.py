@@ -168,15 +168,15 @@ class BaseGAN(BaseModel):
         raise NotImplementedError
 
     @abstractmethod
-    def _build_discriminator(self):
+    def _build_discriminator(self,):
         raise NotImplementedError
 
     @abstractmethod
-    def _compute_loss_generator(self):
+    def _compute_loss_generator(self, fake_output):
         raise NotImplementedError
 
     @abstractmethod
-    def _compute_loss_discriminator(self, x, y):
+    def _compute_loss_discriminator(self, real_output, fake_output):
         raise NotImplementedError
 
     @staticmethod
@@ -189,8 +189,31 @@ class BaseGAN(BaseModel):
 
     def _compute_gradients(self, x, y=None):
         with tf.GradientTape() as discriminator_tape, tf.GradientTape() as generator_tape:
-            loss_discriminator = self._compute_loss_discriminator(x, y)
-            loss_generator = self._compute_loss_generator()
+            noise = self._get_random_noise(self.batch_size)
+
+            if y is not None:
+                y_onehot = tf.keras.utils.to_categorical(y, self.num_classes)
+                y_fake = tf.random.uniform([self.batch_size, ], 0, self.num_classes, dtype=tf.dtypes.int32)
+                y_fake_onehot = tf.keras.utils.to_categorical(y_fake, self.num_classes)
+
+                generated_images = self._gene([noise, y_fake_onehot], training=True)
+
+                real_output, y_label = self._disc(x, training=True)
+                fake_output, y_fake_label = self._disc(generated_images, training=True)
+
+            else:
+                generated_images = self._gene(noise, training=True)
+
+                real_output = self._disc(x, training=True)
+                fake_output = self._disc(generated_images, training=True)
+
+            loss_discriminator = self._compute_loss_discriminator(real_output, fake_output)
+            loss_generator = self._compute_loss_generator(fake_output)
+
+            if y is not None:
+                loss_class = self._compute_loss_class(y_onehot, y_label, y_fake_onehot, y_fake_label)
+                loss_discriminator = loss_discriminator + loss_class
+                loss_generator = loss_generator + loss_class
 
             grad_discriminator = discriminator_tape.gradient(loss_discriminator, self._disc.trainable_variables)
             grad_generator = generator_tape.gradient(loss_generator, self._gene.trainable_variables)
@@ -321,7 +344,11 @@ class BaseGAN(BaseModel):
             fid_random_noise = None
             selected_onehot = None
 
-        ds_train = tf.data.Dataset.from_tensor_slices(scaled_x).shuffle(scaled_x.shape[0]).batch(self.batch_size)
+        if y is None:
+            y = np.empty((x.shape[0], ))
+        ds_train = tf.data.Dataset.from_tensor_slices((scaled_x, y)).shuffle(scaled_x.shape[0]).batch(self.batch_size)
+        y = None
+
         ref_random_noise = self._get_random_noise()
         _, ref_random_onehot = self._get_random_label_and_onehot()
 
@@ -334,13 +361,13 @@ class BaseGAN(BaseModel):
             tqdm_range = trange(iterations)
             iter_cnt = 0
 
-            for train_batch, _ in zip(ds_train, tqdm_range):
+            for (x_tr_batch, y_tr_batch), _ in zip(ds_train, tqdm_range):
                 iter_cnt += 1
 
                 if y is None:
-                    grad_disc, grad_gene, loss_disc, loss_gene = self._compute_gradients(train_batch)
+                    grad_disc, grad_gene, loss_disc, loss_gene = self._compute_gradients(x=x_tr_batch, y=None)
                 else:
-                    grad_disc, grad_gene, loss_disc, loss_gene = self._compute_gradients(train_batch[0], train_batch[1])
+                    grad_disc, grad_gene, loss_disc, loss_gene = self._compute_gradients(x=x_tr_batch, y=y_tr_batch)
 
                 self._apply_gradients_discriminator(grad_disc)
                 epoch_loss_disc.append(loss_disc)
@@ -377,7 +404,10 @@ class BaseGAN(BaseModel):
 
             if log_dir is not None and epoch % log_period == 0:
                 self.save_model(model_dir_name=os.path.join(log_dir, 'epoch_%05d' % epoch))
-                gene_img = self._gene(ref_random_noise, training=False).numpy()
+                if y is None:
+                    gene_img = self._gene(ref_random_noise, training=False).numpy()
+                else:
+                    gene_img = self._gene([ref_random_noise, ref_random_onehot], training=False).numpy()
                 gene_img = self._unscaling_image(gene_img)
                 show_generated_image(gene_img, filename=os.path.join(log_dir, 'epoch_%05d_fid_%s.png' % (epoch, fid)))
 

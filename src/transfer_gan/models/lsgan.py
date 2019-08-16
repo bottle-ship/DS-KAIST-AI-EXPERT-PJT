@@ -44,29 +44,19 @@ class BaseLSGAN(BaseGAN):
     def _build_discriminator(self):
         raise NotImplementedError
 
-    def _compute_loss_generator(self):
-        noise = self._get_random_noise(self.batch_size)
-        generated_images = self._gene(noise, training=True)
-        fake_output = self._disc(generated_images, training=True)
-
+    def _compute_loss_generator(self, fake_output):
         valid = tf.ones_like(fake_output)
 
-        loss = losses.MeanSquaredError()(from_logits=True)(valid, fake_output)
+        loss = losses.MeanSquaredError()(valid, fake_output)
 
         return loss
 
-    def _compute_loss_discriminator(self, x, y=None):
-        noise = self._get_random_noise(self.batch_size)
-        generated_images = self._gene(noise, training=True)
-
-        real_output = self._disc(x, training=True)
-        fake_output = self._disc(generated_images, training=True)
-
+    def _compute_loss_discriminator(self, real_output, fake_output):
         valid = tf.ones_like(real_output)
         fake = tf.zeros_like(fake_output)
 
-        loss_real = losses.MeanSquaredError()(from_logits=True)(valid, real_output)
-        loss_fake = losses.MeanSquaredError()(from_logits=True)(fake, fake_output)
+        loss_real = losses.MeanSquaredError()(valid, real_output)
+        loss_fake = losses.MeanSquaredError()(fake, fake_output)
 
         loss = loss_real + loss_fake
 

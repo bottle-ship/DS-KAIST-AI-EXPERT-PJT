@@ -36,7 +36,6 @@ class BaseACGAN(BaseGAN):
             tf_verbose=tf_verbose,
             kwargs=kwargs
         )
-        self._loss_class = None
 
     @abstractmethod
     def _build_generator(self):
@@ -46,30 +45,14 @@ class BaseACGAN(BaseGAN):
     def _build_discriminator(self):
         raise NotImplementedError
 
-    def _compute_loss_generator(self):
-        noise = self._get_random_noise(self.batch_size)
-        generated_images = self._gene(noise, training=True)
-        fake_output = self._disc(generated_images, training=True)
-
+    def _compute_loss_generator(self, fake_output):
         valid = tf.ones_like(fake_output)
 
         loss = losses.BinaryCrossentropy(from_logits=True)(valid, fake_output)
 
-        loss = loss + self._loss_class
-
         return loss
 
-    def _compute_loss_discriminator(self, x, y):
-        y_onehot = tf.keras.utils.to_categorical(y, self.num_classes)
-        y_fake = tf.random.uniform([self.batch_size, ], 0, self.num_classes, dtype=tf.dtypes.int32)
-        y_fake_onehot = tf.keras.utils.to_categorical(y_fake, self.num_classes)
-
-        noise = self._get_random_noise(self.batch_size)
-        generated_images = self._gene([noise, y_fake_onehot], training=True)
-
-        real_output, y_label = self._disc(x, training=True)
-        fake_output, y_fake_label = self._disc(generated_images, training=True)
-
+    def _compute_loss_discriminator(self, real_output, fake_output):
         valid = tf.ones_like(real_output)
         fake = tf.zeros_like(fake_output)
 
@@ -78,14 +61,10 @@ class BaseACGAN(BaseGAN):
 
         loss = loss_real + loss_fake
 
-        self._loss_class = self._compute_loss_class(y_onehot, y_label, y_fake_onehot, y_fake_label)
-
-        loss = loss + self._loss_class
-
         return loss
 
-    def fit(self, x, log_dir=None, log_period=5):
-        self._fit(x=x, y=None, log_dir=log_dir, log_period=log_period)
+    def fit(self, x, y=None, log_dir=None, log_period=5):
+        self._fit(x=x, y=y, log_dir=log_dir, log_period=log_period)
 
         raise self
 
