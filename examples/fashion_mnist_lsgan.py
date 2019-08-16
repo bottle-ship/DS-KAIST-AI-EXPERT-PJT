@@ -1,5 +1,5 @@
 from transfer_gan.datasets import DatasetLoader
-from transfer_gan.models.dcgan import DCGANFashionMnist
+from transfer_gan.models.lsgan import LSGANFashionMnist
 from transfer_gan.utils.data_utils import get_data_information
 
 
@@ -9,17 +9,18 @@ if __name__ == '__main__':
 
     input_shape, _ = get_data_information(x_train, y_train)
 
-    model = DCGANFashionMnist(
+    model = LSGANFashionMnist(
         input_shape=input_shape,
         noise_dim=100,
         fake_activation='tanh',
         batch_size=64,
         optimizer='adam',
         learning_rate=1e-4,
-        adam_beta_1=0.9,
+        disc_clip_value=0.01,
         epochs=15,
+        period_update_gene=1,
         n_fid_samples=5000,
         tf_verbose=False
     )
-    model.fit(x_train, log_dir='log_dcgan-fashion_mnist', log_period=1)
+    model.fit(x_train, log_dir='log_fashion_mnist_lsgan', log_period=1)
     model.predict(plot=True)

@@ -2,12 +2,11 @@ import tensorflow as tf
 
 from abc import abstractmethod
 from tensorflow.python.keras import layers
-from tensorflow.python.keras import losses
 
 from ._base_gan import BaseGAN
 
 
-class BaseDCGAN(BaseGAN):
+class BaseWGAN(BaseGAN):
 
     def __init__(self, input_shape,
                  noise_dim,
@@ -15,12 +14,13 @@ class BaseDCGAN(BaseGAN):
                  fake_activation,
                  optimizer,
                  learning_rate,
+                 disc_clip_value,
                  epochs,
                  period_update_gene,
                  n_fid_samples,
                  tf_verbose,
                  **kwargs):
-        super(BaseDCGAN, self).__init__(
+        super(BaseWGAN, self).__init__(
             input_shape=input_shape,
             noise_dim=noise_dim,
             num_classes=None,
@@ -28,7 +28,7 @@ class BaseDCGAN(BaseGAN):
             fake_activation=fake_activation,
             optimizer=optimizer,
             learning_rate=learning_rate,
-            disc_clip_value=None,
+            disc_clip_value=disc_clip_value,
             epochs=epochs,
             period_update_gene=period_update_gene,
             n_fid_samples=n_fid_samples,
@@ -45,20 +45,20 @@ class BaseDCGAN(BaseGAN):
         raise NotImplementedError
 
     def _compute_loss_generator(self, fake_output):
-        valid = tf.ones_like(fake_output)
+        valid = -1 * tf.ones_like(fake_output)
 
-        loss = losses.BinaryCrossentropy(from_logits=True)(valid, fake_output)
+        loss = tf.reduce_mean(valid * fake_output)
 
         return loss
 
     def _compute_loss_discriminator(self, real_output, fake_output):
-        valid = tf.ones_like(real_output)
-        fake = tf.zeros_like(fake_output)
+        valid = -1 * tf.ones_like(real_output)
+        fake = tf.ones_like(fake_output)
 
-        loss_real = losses.BinaryCrossentropy(from_logits=True)(valid, real_output)
-        loss_fake = losses.BinaryCrossentropy(from_logits=True)(fake, fake_output)
+        real_loss = tf.reduce_mean(valid * real_output)
+        fake_loss = tf.reduce_mean(fake * fake_output)
 
-        loss = loss_real + loss_fake
+        loss = real_loss + fake_loss
 
         return loss
 
@@ -71,7 +71,7 @@ class BaseDCGAN(BaseGAN):
         raise self._predict(n_images=n_images, plot=plot, filename=filename)
 
 
-class DCGANFashionMnist(BaseDCGAN):
+class WGANFashionMnist(BaseWGAN):
 
     def __init__(self, input_shape,
                  noise_dim,
@@ -79,18 +79,20 @@ class DCGANFashionMnist(BaseDCGAN):
                  fake_activation='tanh',
                  optimizer='adam',
                  learning_rate=1e-4,
+                 disc_clip_value=0.01,
                  epochs=15,
-                 period_update_gene=3,
+                 period_update_gene=1,
                  n_fid_samples=5000,
                  tf_verbose=False,
                  **kwargs):
-        super(DCGANFashionMnist, self).__init__(
+        super(WGANFashionMnist, self).__init__(
             input_shape=input_shape,
             noise_dim=noise_dim,
             batch_size=batch_size,
             fake_activation=fake_activation,
             optimizer=optimizer,
             learning_rate=learning_rate,
+            disc_clip_value=disc_clip_value,
             epochs=epochs,
             period_update_gene=period_update_gene,
             n_fid_samples=n_fid_samples,
