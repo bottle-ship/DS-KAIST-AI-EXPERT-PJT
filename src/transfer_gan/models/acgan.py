@@ -66,10 +66,10 @@ class BaseACGAN(BaseGAN):
     def fit(self, x, y=None, log_dir=None, log_period=5):
         self._fit(x=x, y=y, log_dir=log_dir, log_period=log_period)
 
-        raise self
+        return self
 
     def predict(self, n_images=25, label=None, plot=False, filename=None):
-        raise self._predict_with_label(n_images=n_images, label=label, plot=plot, filename=filename)
+        return self._predict_with_label(n_images=n_images, label=label, plot=plot, filename=filename)
 
 
 class ACGANFashionMnist(BaseACGAN):

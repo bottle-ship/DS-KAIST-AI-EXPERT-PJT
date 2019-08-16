@@ -65,10 +65,10 @@ class BaseLSGAN(BaseGAN):
     def fit(self, x, log_dir=None, log_period=5):
         self._fit(x=x, y=None, log_dir=log_dir, log_period=log_period)
 
-        raise self
+        return self
 
     def predict(self, n_images=25, plot=False, filename=None):
-        raise self._predict(n_images=n_images, plot=plot, filename=filename)
+        return self._predict(n_images=n_images, plot=plot, filename=filename)
 
 
 class LSGANFashionMnist(BaseLSGAN):
