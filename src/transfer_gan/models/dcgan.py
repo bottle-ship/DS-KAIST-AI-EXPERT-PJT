@@ -4,7 +4,7 @@ from abc import abstractmethod
 from tensorflow.python.keras import layers
 from tensorflow.python.keras import losses
 
-from ._base_gan_refactor import BaseGAN
+from ._base_gan import BaseGAN
 
 
 class BaseDCGAN(BaseGAN):

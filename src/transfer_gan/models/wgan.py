@@ -3,7 +3,7 @@ import tensorflow as tf
 from abc import abstractmethod
 from tensorflow.python.keras import layers
 
-from ._base_gan_refactor import BaseGAN
+from ._base_gan import BaseGAN
 
 
 class BaseWGAN(BaseGAN):
