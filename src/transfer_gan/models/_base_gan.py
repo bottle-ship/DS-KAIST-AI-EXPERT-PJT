@@ -58,7 +58,7 @@ class BaseGAN(BaseModel):
         self._gene_optimizer = self._set_optimizer()
         self._disc_optimizer = self._set_optimizer()
 
-        self._fid_stats_path = './fid_stats' + datetime.datetime.now().strftime("_%Y%m%d-%H%M%S") + '.npz'
+        self._fid_stats_path = None
 
         self.history = list()
 
@@ -260,7 +260,8 @@ class BaseGAN(BaseModel):
         if log_dir is not None:
             log_dir = make_directory(log_dir, time_suffix=True)
 
-        if self.n_fid_samples > 0:
+        if self.n_fid_samples > 0 and self._fid_stats_path is None:
+            self._fid_stats_path = './fid_stats' + datetime.datetime.now().strftime("_%Y%m%d-%H%M%S") + '.npz'
             if self.input_channel_ == 1:
                 create_realdata_stats(np.repeat(x, 3, axis=3), self._fid_stats_path)
             else:
@@ -365,6 +366,12 @@ class BaseGAN(BaseModel):
 
         return gene_img, random_label.numpy()
 
+    def set_fid_stats_path(self, path):
+        if os.path.exists(path):
+            self._fid_stats_path = path
+        else:
+            raise FileNotFoundError("'%s' was not found." % path)
+
     @abstractmethod
     def fit(self, x, **kwargs):
         raise NotImplementedError
@@ -375,11 +382,11 @@ class BaseGAN(BaseModel):
 
     def show_generator_model(self, filename='generator.png'):
         self._gene.summary()
-        plot_model(self._gene, filename)
+        plot_model(self._gene, filename, show_shapes=True)
 
     def show_discriminator_model(self, filename='discriminator.png'):
         self._disc.summary()
-        plot_model(self._disc, filename)
+        plot_model(self._disc, filename, show_shapes=True)
 
     def save_model(self, model_dir_name):
         make_directory(model_dir_name)
