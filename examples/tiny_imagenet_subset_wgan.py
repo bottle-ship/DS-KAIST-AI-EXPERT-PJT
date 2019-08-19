@@ -111,7 +111,6 @@ def train():
 
     model = WGANTinyImagenetSubset(
         input_shape=input_shape,
-        num_classes=num_classes,
         noise_dim=110,
         optimizer='RMSProp',
         epochs=3000,
