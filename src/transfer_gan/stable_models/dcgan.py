@@ -128,6 +128,7 @@ class BaseDCGAN(object):
         fake = np.zeros((self.batch_size, 1))
 
         ref_noise = np.random.normal(0, 1, (self.batch_size, self.latent_dim))
+        ref_fid_noise = np.random.normal(0, 1, (self.n_fid_samples, self.latent_dim))
 
         for iteration in range(self.iterations):
             idx = np.random.randint(0, scaled_x.shape[0], self.batch_size)
@@ -143,13 +144,11 @@ class BaseDCGAN(object):
             g_loss = self.combined.train_on_batch(noise, valid)
 
             if iteration % save_interval == 0:
-                noise = np.random.normal(0, 1, (self.n_fid_samples, self.latent_dim))
-
-                gen_imgs = self.generator.predict(noise)
+                gen_imgs = self.generator.predict(ref_fid_noise)
                 gen_imgs = self._unscaling_image(gen_imgs)
 
                 fid_score = fid_with_realdata_stats(gen_imgs, self.fid_stats_path)
-                print("%d [D loss: %f, acc.: %.2f%%] [G loss: %f] [FID: %f]" %
+                print("%d [D loss: %.3f, acc.: %.2f%%] [G loss: %.3f] [FID: %.2f]" %
                       (iteration, d_loss[0], 100 * d_loss[1], g_loss, fid_score))
 
                 if log_dir is not None:
