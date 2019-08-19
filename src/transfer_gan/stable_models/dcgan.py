@@ -27,6 +27,10 @@ class BaseDCGAN(object):
                  iterations,
                  fid_stats_path,
                  n_fid_samples,
+                 disc_model_path,
+                 disc_weights_path,
+                 gene_model_path,
+                 gene_weights_path,
                  tf_verbose):
         if not tf_verbose:
             os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -51,15 +55,24 @@ class BaseDCGAN(object):
         self.optimizer = Adam(self.learning_rate, self.adam_beta_1)
 
         # Build and compile the discriminator
-        self.discriminator = self._build_discriminator()
-        # self.discriminator.compile(loss='binary_crossentropy',
-        #                            optimizer=self.optimizer,
-        #                            metrics=['accuracy'])
+        if disc_model_path is None:
+            self.discriminator = self._build_discriminator()
+        else:
+            self.discriminator = load_model_from_json(disc_model_path)
         self._compile_discriminator()
 
+        if disc_weights_path is not None:
+            self.discriminator.load_weights(disc_weights_path)
+
         # Build the generator
-        self.generator = self._build_generator()
+        if gene_model_path is None:
+            self.generator = self._build_generator()
+        else:
+            self.generator = load_model_from_json(gene_model_path)
         self._validate_generator_output_shape()
+
+        if gene_weights_path is not None:
+            self.generator.load_weights(gene_weights_path)
 
         # The generator takes noise as input and generates imgs
         z = Input(shape=(self.latent_dim,))
@@ -115,7 +128,7 @@ class BaseDCGAN(object):
         raise NotImplementedError
 
     @abstractmethod
-    def _build_discriminator(self, ):
+    def _build_discriminator(self):
         raise NotImplementedError
 
     def fit(self, x, log_dir=None, save_interval=50):
@@ -180,32 +193,6 @@ class BaseDCGAN(object):
         save_model_to_json(self.discriminator, os.path.join(model_dir_name, 'discriminator_model.json'))
         self.discriminator.save_weights(os.path.join(model_dir_name, 'discriminator_weights.h5'))
 
-    def load_model(self, model_dir_name):
-        self.discriminator = load_model_from_json(os.path.join(model_dir_name, 'discriminator_model.json'))
-        self.discriminator.load_weights(os.path.join(model_dir_name, 'discriminator_weights.h5'))
-
-        self._compile_discriminator()
-
-        self.generator = load_model_from_json(os.path.join(model_dir_name, 'generator_model.json'))
-        self.generator.load_weights(os.path.join(model_dir_name, 'generator_weights.h5'))
-
-        self._validate_generator_output_shape()
-
-        # The generator takes noise as input and generates imgs
-        z = Input(shape=(self.latent_dim,))
-        img = self.generator(z)
-
-        # For the combined model we will only train the generator
-        self.discriminator.trainable = False
-
-        # The discriminator takes generated images as input and determines validity
-        valid = self.discriminator(img)
-
-        # The combined model  (stacked generator and discriminator)
-        # Trains the generator to fool the discriminator
-        self.combined = models.Model(z, valid)
-        self.combined.compile(loss='binary_crossentropy', optimizer=self.optimizer)
-
 
 class DCGANTinyImagenetSubset(BaseDCGAN):
 
@@ -218,6 +205,10 @@ class DCGANTinyImagenetSubset(BaseDCGAN):
                  iterations=50000,
                  fid_stats_path=None,
                  n_fid_samples=5000,
+                 disc_model_path=None,
+                 disc_weights_path=None,
+                 gene_model_path=None,
+                 gene_weights_path=None,
                  tf_verbose=False):
         super(DCGANTinyImagenetSubset, self).__init__(
             input_shape=input_shape,
@@ -229,6 +220,10 @@ class DCGANTinyImagenetSubset(BaseDCGAN):
             iterations=iterations,
             fid_stats_path=fid_stats_path,
             n_fid_samples=n_fid_samples,
+            disc_model_path=disc_model_path,
+            disc_weights_path=disc_weights_path,
+            gene_model_path=gene_model_path,
+            gene_weights_path=gene_weights_path,
             tf_verbose=tf_verbose
         )
 
