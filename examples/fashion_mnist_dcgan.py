@@ -1,4 +1,5 @@
 from transfer_gan.datasets import DatasetLoader
+from transfer_gan.datasets.fid_stats import get_fid_stats_path_fashion_mnist
 from transfer_gan.models.dcgan import DCGANFashionMnist
 from transfer_gan.utils.data_utils import get_data_information
 
@@ -21,5 +22,6 @@ if __name__ == '__main__':
         n_fid_samples=5000,
         tf_verbose=False
     )
+    model.set_fid_stats_path(get_fid_stats_path_fashion_mnist())
     model.fit(x_train, log_dir='log_fashion_mnist_dcgan', log_period=1)
     model.predict(plot=True)

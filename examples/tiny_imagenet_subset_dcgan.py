@@ -109,7 +109,6 @@ def train():
 
     model = DCGANTinyImagenetSubset(
         input_shape=input_shape,
-        num_classes=num_classes,
         noise_dim=110,
         adam_beta_1=0.7,
         epochs=3000,
