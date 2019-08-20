@@ -23,6 +23,7 @@ import tensorflow as tf
 
 from cv2 import imread
 from scipy import linalg
+from tensorflow.python.keras import backend
 
 
 class InvalidFIDException(Exception):
@@ -354,6 +355,7 @@ def create_realdata_stats(x, output_path):
 
 
 def fid_with_realdata_stats(x, stats_path):
+    backend.clear_session()
     config = tf.compat.v1.ConfigProto()
     config.gpu_options.allow_growth = True
     config.gpu_options.per_process_gpu_memory_fraction = 0.333
