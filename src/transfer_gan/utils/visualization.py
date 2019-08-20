@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 
 def show_image_from_dataset(x, y, class_names=None):
@@ -53,6 +54,37 @@ def show_generated_image(x, n_col=8, filename=None):
 
     plt.subplots_adjust(wspace=0.0, hspace=0.0)
     plt.tight_layout()
+
+    if filename is not None:
+        plt.savefig(filename)
+    else:
+        plt.show()
+    plt.close()
+
+
+def show_compare_fid_history(history_path_list, label_list, filename=None):
+    df_list = list()
+    for history_path in history_path_list:
+        df_list.append(pd.read_csv(history_path))
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+
+    max_epochs = 0
+
+    for df, label in zip(df_list, label_list):
+        epochs = df['Epochs'].values.max()
+        if epochs > max_epochs:
+            max_epochs = epochs
+
+        ax.plot(df['Epochs'].values.tolist(), df['FID'].values.tolist(), label=label)
+
+    ax.set_xlabel('Epochs', fontsize=14)
+    ax.set_ylabel('FID', fontsize=14)
+
+    ax.set_xlim(0, max_epochs)
+
+    plt.legend()
 
     if filename is not None:
         plt.savefig(filename)
