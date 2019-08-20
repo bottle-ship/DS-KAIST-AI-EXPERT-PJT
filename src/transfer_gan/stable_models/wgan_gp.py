@@ -305,7 +305,7 @@ class WGANGPTinyImagenetSubset(BaseWGANGP):
                  batch_size=128,
                  fake_activation='tanh',
                  learning_rate=0.0002,
-                 adam_beta_1=0.5,
+                 adam_beta_1=0,
                  adam_beta_2=0.9,
                  gp_loss_weight=10,
                  iterations=50000,
