@@ -1,6 +1,7 @@
 import os
 
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 
 from abc import abstractmethod
@@ -89,6 +90,8 @@ class BaseDCGAN(object):
         self.combined = models.Model(z, valid)
         self.combined.compile(loss='binary_crossentropy', optimizer=self.optimizer)
 
+        self.history = list()
+
     def _compile_discriminator(self):
         self.discriminator.compile(loss='binary_crossentropy',
                                    optimizer=self.optimizer,
@@ -164,8 +167,14 @@ class BaseDCGAN(object):
                 print("%d [D loss: %.3f, acc.: %.2f%%] [G loss: %.3f] [FID: %.2f]" %
                       (iteration, d_loss[0], 100 * d_loss[1], g_loss, fid_score))
 
+                self.history.append([iteration, d_loss[0], g_loss, fid_score])
+
                 if log_dir is not None:
                     self.save_model(model_dir_name=os.path.join(log_dir, 'iteration_%05d' % iteration))
+                    pd.DataFrame(self.history, columns=['Epochs', 'Loss_Disc', 'Loss_Gene', 'FID']).to_csv(
+                        os.path.join(os.path.join(log_dir, 'iteration_%05d' % iteration), 'history.csv'),
+                        index=False
+                    )
                     ref_gen_imgs = self.generator.predict(ref_noise)
                     ref_gen_imgs = self._unscaling_image(ref_gen_imgs)
                     show_generated_image(
@@ -271,5 +280,114 @@ class DCGANTinyImagenetSubset(BaseDCGAN):
         features = layers.Flatten()(x)
 
         validity = layers.Dense(1, activation='sigmoid', name='discriminator')(features)
+
+        return models.Model(image, validity)
+
+
+#  https://github.com/khanrc/tf.gans-comparison/blob/master/models/wgan_gp.py
+
+class DCGANTinyImagenetSubsetResidual(BaseDCGAN):
+
+    def __init__(self, input_shape,
+                 latent_dim,
+                 batch_size=128,
+                 fake_activation='tanh',
+                 learning_rate=0.0002,
+                 adam_beta_1=0.5,
+                 iterations=50000,
+                 fid_stats_path=None,
+                 n_fid_samples=5000,
+                 disc_model_path=None,
+                 disc_weights_path=None,
+                 gene_model_path=None,
+                 gene_weights_path=None,
+                 tf_verbose=False):
+        super(DCGANTinyImagenetSubsetResidual, self).__init__(
+            input_shape=input_shape,
+            latent_dim=latent_dim,
+            batch_size=batch_size,
+            fake_activation=fake_activation,
+            learning_rate=learning_rate,
+            adam_beta_1=adam_beta_1,
+            iterations=iterations,
+            fid_stats_path=fid_stats_path,
+            n_fid_samples=n_fid_samples,
+            disc_model_path=disc_model_path,
+            disc_weights_path=disc_weights_path,
+            gene_model_path=gene_model_path,
+            gene_weights_path=gene_weights_path,
+            tf_verbose=tf_verbose
+        )
+        self.nf = self.input_shape[1]
+
+    @staticmethod
+    def _residual_block_down(inputs, outputs, kernel_size=(3, 3)):
+        input_shape = inputs.shape
+        print(inputs.shape)
+        nf_input = input_shape[-1]
+
+        shortcut = layers.AveragePooling2D(pool_size=(2, 2))(inputs)
+        shortcut = layers.Conv2D(outputs, kernel_size=(1, 1))(shortcut)
+
+        net = layers.ReLU()(inputs)
+        # net = tf.keras.layers.BatchNormalization()(net)
+        net = layers.Conv2D(nf_input, kernel_size=kernel_size)(net)
+        net = layers.ReLU()(net)
+        # net = tf.keras.layers.BatchNormalization()(net)
+        net = layers.Conv2D(outputs, kernel_size=kernel_size)(net)
+        net = layers.AveragePooling2D(pool_size=(2, 2))(net)
+
+        return layers.Add()([shortcut, net])
+
+    @staticmethod
+    def _residual_block_up(inputs, outputs, kernel_size=(3, 3)):
+        shortcut = layers.UpSampling2D()(inputs)
+        shortcut = layers.Conv2D(outputs, kernel_size=(1, 1))(shortcut)
+
+        net = layers.ReLU()(inputs)
+        net = layers.BatchNormalization(momentum=0.8)(net)
+        net = layers.UpSampling2D()(net)
+        net = layers.Conv2D(outputs, kernel_size=kernel_size)(net)
+        net = layers.ReLU()(net)
+        net = layers.BatchNormalization(momentum=0.8)(net)
+        net = layers.Conv2D(outputs, kernel_size=kernel_size)(net)
+
+        return layers.Add()([shortcut, net])
+
+    def _build_generator(self):
+        nf = self.input_shape[1]
+
+        inputs = layers.Input(shape=(self.latent_dim,))
+
+        x = layers.Dense(8 * nf * 4 * 4)(inputs)
+        x = layers.Reshape((4, 4, 8 * nf))(x)
+
+        x = self._residual_block_up(x, 8 * nf)
+        x = self._residual_block_up(x, 4 * nf)
+        x = self._residual_block_up(x, 2 * nf)
+        x = self._residual_block_up(x, 1 * nf)
+
+        x = layers.BatchNormalization(momentum=0.8)(x)
+        x = layers.Conv2D(self.input_channel_, kernel_size=3, padding="same")(x)
+
+        fake = layers.Activation(self.fake_activation)(x)
+
+        return models.Model(inputs, fake)
+
+    def _build_discriminator(self):
+        nf = self.input_shape[1]
+
+        image = layers.Input(shape=self.input_shape)
+
+        x = layers.Conv2D(nf, kernel_size=3)(image)
+
+        x = self._residual_block_down(x, 2 * nf)
+        x = self._residual_block_down(x, 4 * nf)
+        x = self._residual_block_down(x, 8 * nf)
+        x = self._residual_block_down(x, 8 * nf)
+
+        features = layers.Flatten()(x)
+
+        validity = layers.Dense(1, name='discriminator')(features)
 
         return models.Model(image, validity)
