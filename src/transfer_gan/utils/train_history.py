@@ -21,4 +21,4 @@ def get_train_history(target_path):
     df_history = pd.DataFrame(data, columns=['Epochs', 'FID'])
     df_history = df_history.sort_values(by=['Epochs']).reset_index(drop=True)
 
-    df_history.to_csv('history.csv')
+    df_history.to_csv('history.csv', index=False)
