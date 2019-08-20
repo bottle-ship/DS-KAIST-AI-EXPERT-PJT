@@ -11,6 +11,7 @@ from keras import models
 from keras.optimizers import Adam
 from keras.regularizers import l2
 from keras.utils import plot_model
+from keras.utils import to_categorical
 
 from ..metrics.fid import fid_with_realdata_stats
 from ..utils.keras_utils import load_model_from_json, save_model_to_json
@@ -18,9 +19,10 @@ from ..utils.os_utils import make_directory
 from ..utils.visualization import show_generated_image
 
 
-class BaseDCGAN(object):
+class BaseACGAN(object):
 
     def __init__(self, input_shape,
+                 num_classes,
                  latent_dim,
                  batch_size,
                  fake_activation,
@@ -43,6 +45,7 @@ class BaseDCGAN(object):
         K.set_session(tf.compat.v1.Session(config=self.config))
 
         self.input_shape = input_shape
+        self.num_classes = num_classes
         self.latent_dim = latent_dim
         self.batch_size = batch_size
         self.fake_activation = fake_activation
@@ -61,10 +64,13 @@ class BaseDCGAN(object):
             self.discriminator = self._build_discriminator()
         else:
             self.discriminator = load_model_from_json(disc_model_path)
-        self._compile_discriminator()
 
         if disc_weights_path is not None:
             self.discriminator.load_weights(disc_weights_path)
+
+        self.discriminator.compile(loss=['binary_crossentropy', 'sparse_categorical_crossentropy'],
+                                   optimizer=self.optimizer,
+                                   metrics=['accuracy'])
 
         # Build the generator
         if gene_model_path is None:
@@ -76,27 +82,26 @@ class BaseDCGAN(object):
         if gene_weights_path is not None:
             self.generator.load_weights(gene_weights_path)
 
-        # The generator takes noise as input and generates imgs
-        z = layers.Input(shape=(self.latent_dim,))
-        img = self.generator(z)
+        # The generator takes noise and the target label as input
+        # and generates the corresponding digit of that label
+        noise = layers.Input(shape=(self.latent_dim,))
+        label = layers.Input(shape=(1,))
+        img = self.generator([noise, label])
 
         # For the combined model we will only train the generator
         self.discriminator.trainable = False
 
-        # The discriminator takes generated images as input and determines validity
-        valid = self.discriminator(img)
+        # The discriminator takes generated image as input and determines validity
+        # and the label of that image
+        valid, target_label = self.discriminator(img)
 
         # The combined model  (stacked generator and discriminator)
         # Trains the generator to fool the discriminator
-        self.combined = models.Model(z, valid)
-        self.combined.compile(loss='binary_crossentropy', optimizer=self.optimizer)
+        self.combined = models.Model([noise, label], [valid, target_label])
+        self.combined.compile(loss=['binary_crossentropy', 'sparse_categorical_crossentropy'],
+                              optimizer=self.optimizer)
 
         self.history = list()
-
-    def _compile_discriminator(self):
-        self.discriminator.compile(loss='binary_crossentropy',
-                                   optimizer=self.optimizer,
-                                   metrics=['accuracy'])
 
     def _scaling_image(self, x):
         if self.fake_activation == 'sigmoid':
@@ -135,40 +140,46 @@ class BaseDCGAN(object):
     def _build_discriminator(self):
         raise NotImplementedError
 
-    def fit(self, x, log_dir=None, save_interval=50):
+    def fit(self, x, y, log_dir=None, save_interval=50):
         if log_dir is not None:
             log_dir = make_directory(log_dir, time_suffix=True)
             self.show_discriminator_model(os.path.join(log_dir, 'discriminator.png'))
             self.show_generator_model(os.path.join(log_dir, 'generator.png'))
 
         scaled_x = self._scaling_image(x)
+        y = y.reshape(-1, 1)
 
         valid = np.ones((self.batch_size, 1))
         fake = np.zeros((self.batch_size, 1))
 
         ref_noise = np.random.normal(0, 1, (self.batch_size, self.latent_dim))
+        ref_sampled_labels = np.random.randint(0, self.num_classes, (self.batch_size, 1))
+
         ref_fid_noise = np.random.normal(0, 1, (self.n_fid_samples, self.latent_dim))
+        ref_fid_sampled_labels = np.random.randint(0, self.num_classes, (self.n_fid_samples, 1))
 
         for iteration in range(self.iterations):
             idx = np.random.randint(0, scaled_x.shape[0], self.batch_size)
             imgs = scaled_x[idx]
+            img_labels = y[idx]
 
             noise = np.random.normal(0, 1, (self.batch_size, self.latent_dim))
-            gen_imgs = self.generator.predict(noise)
+            sampled_labels = np.random.randint(0, self.num_classes, (self.batch_size, 1))
+            gen_imgs = self.generator.predict([noise, sampled_labels])
 
-            d_loss_real = self.discriminator.train_on_batch(imgs, valid)
-            d_loss_fake = self.discriminator.train_on_batch(gen_imgs, fake)
+            d_loss_real = self.discriminator.train_on_batch(imgs, [valid, img_labels])
+            d_loss_fake = self.discriminator.train_on_batch(gen_imgs, [fake, sampled_labels])
             d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
-            g_loss = self.combined.train_on_batch(noise, valid)
+            g_loss = self.combined.train_on_batch([noise, sampled_labels], [valid, sampled_labels])
 
             if iteration % save_interval == 0:
-                gen_imgs = self.generator.predict(ref_fid_noise)
+                gen_imgs = self.generator.predict([ref_fid_noise, ref_fid_sampled_labels])
                 gen_imgs = self._unscaling_image(gen_imgs)
 
                 fid_score = fid_with_realdata_stats(gen_imgs, self.fid_stats_path)
                 print("[Iter %05d] [D loss: %.3f, acc.: %.2f%%] [G loss: %.3f] [FID: %.2f]" %
-                      (iteration, d_loss[0], 100 * d_loss[1], g_loss, fid_score))
+                      (iteration, d_loss[0], 100 * d_loss[1], g_loss[0], fid_score))
 
                 self.history.append([iteration, d_loss[0], g_loss, fid_score])
 
@@ -177,16 +188,21 @@ class BaseDCGAN(object):
                     pd.DataFrame(self.history, columns=['Epochs', 'Loss_Disc', 'Loss_Gene', 'FID']).to_csv(
                         os.path.join(log_dir, 'history.csv'), index=False
                     )
-                    ref_gen_imgs = self.generator.predict(ref_noise)
+                    ref_gen_imgs = self.generator.predict([ref_noise, ref_sampled_labels])
                     ref_gen_imgs = self._unscaling_image(ref_gen_imgs)
                     show_generated_image(
                         ref_gen_imgs,
                         filename=os.path.join(log_dir, 'iteration_%05d_fid_%.2f.png' % (iteration, fid_score))
                     )
 
-    def predict(self, n_images=25, plot=False, filename=None):
+    def predict(self, label=None, n_images=25, plot=False, filename=None):
         noise = np.random.normal(0, 1, (n_images, self.latent_dim))
-        gen_imgs = self.generator.predict(noise)
+        if label is None:
+            sampled_labels = np.random.randint(0, self.num_classes, (self.batch_size, 1))
+        else:
+            sampled_labels = np.random.randint(label, label + 1, (self.batch_size, 1))
+
+        gen_imgs = self.generator.predict([noise, sampled_labels])
 
         gen_imgs = self._unscaling_image(gen_imgs)
 
@@ -213,9 +229,10 @@ class BaseDCGAN(object):
         self.discriminator.save_weights(os.path.join(model_dir_name, 'discriminator_weights.h5'))
 
 
-class DCGANTinyImagenetSubset(BaseDCGAN):
+class ACGANTinyImagenetSubset(BaseACGAN):
 
     def __init__(self, input_shape,
+                 num_classes,
                  latent_dim,
                  batch_size=128,
                  fake_activation='tanh',
@@ -229,8 +246,9 @@ class DCGANTinyImagenetSubset(BaseDCGAN):
                  gene_model_path=None,
                  gene_weights_path=None,
                  tf_verbose=False):
-        super(DCGANTinyImagenetSubset, self).__init__(
+        super(ACGANTinyImagenetSubset, self).__init__(
             input_shape=input_shape,
+            num_classes=num_classes,
             latent_dim=latent_dim,
             batch_size=batch_size,
             fake_activation=fake_activation,
@@ -247,7 +265,11 @@ class DCGANTinyImagenetSubset(BaseDCGAN):
         )
 
     def _build_generator(self):
-        inputs = layers.Input(shape=(self.latent_dim,))
+        z = layers.Input(shape=(self.latent_dim,))
+        y = layers.Input(shape=(1,))
+        y_embedding = layers.Flatten()(layers.Embedding(self.num_classes, self.latent_dim)(y))
+
+        inputs = layers.multiply([z, y_embedding])
 
         x = layers.Dense(512 * 4 * 4)(inputs)
         x = layers.ReLU()(x)
@@ -268,7 +290,7 @@ class DCGANTinyImagenetSubset(BaseDCGAN):
 
         fake = layers.Activation(self.fake_activation)(x)
 
-        return models.Model(inputs, fake)
+        return models.Model([z, y], fake)
 
     def _build_discriminator(self):
         image = layers.Input(shape=self.input_shape)
@@ -290,14 +312,16 @@ class DCGANTinyImagenetSubset(BaseDCGAN):
         features = layers.Flatten()(x)
 
         validity = layers.Dense(1, activation='sigmoid', name='discriminator')(features)
+        aux = layers.Dense(self.num_classes, activation='softmax', name='auxiliary')(features)
 
-        return models.Model(image, validity)
+        return models.Model(image, [validity, aux])
 
 
-class DCGANTinyImagenetSubsetRegularizer(BaseDCGAN):
+class ACGANTinyImagenetSubsetRegularizer(BaseACGAN):
 
     def __init__(self, input_shape,
                  latent_dim,
+                 num_classes,
                  batch_size=128,
                  fake_activation='tanh',
                  learning_rate=0.0002,
@@ -314,8 +338,9 @@ class DCGANTinyImagenetSubsetRegularizer(BaseDCGAN):
                  tf_verbose=False):
         self.disc_l2_value = disc_l2_value
         self.gene_l2_value = gene_l2_value
-        super(DCGANTinyImagenetSubsetRegularizer, self).__init__(
+        super(ACGANTinyImagenetSubsetRegularizer, self).__init__(
             input_shape=input_shape,
+            num_classes=num_classes,
             latent_dim=latent_dim,
             batch_size=batch_size,
             fake_activation=fake_activation,
@@ -332,7 +357,11 @@ class DCGANTinyImagenetSubsetRegularizer(BaseDCGAN):
         )
 
     def _build_generator(self):
-        inputs = layers.Input(shape=(self.latent_dim,))
+        z = layers.Input(shape=(self.latent_dim,))
+        y = layers.Input(shape=(1,))
+        y_embedding = layers.Flatten()(layers.Embedding(self.num_classes, self.latent_dim)(y))
+
+        inputs = layers.multiply([z, y_embedding])
 
         x = layers.Dense(512 * 4 * 4)(inputs)
         x = layers.ReLU()(x)
@@ -353,7 +382,7 @@ class DCGANTinyImagenetSubsetRegularizer(BaseDCGAN):
 
         fake = layers.Activation(self.fake_activation)(x)
 
-        return models.Model(inputs, fake)
+        return models.Model([z, y], fake)
 
     def _build_discriminator(self):
         image = layers.Input(shape=self.input_shape)
@@ -362,12 +391,14 @@ class DCGANTinyImagenetSubsetRegularizer(BaseDCGAN):
         x = layers.LeakyReLU(alpha=0.2)(x)
         x = layers.Dropout(0.25)(x)
 
-        x = layers.Conv2D(256, kernel_size=3, strides=1, padding="same", kernel_regularizer=l2(self.gene_l2_value))(x)
+        x = layers.Conv2D(256, kernel_size=3, strides=1, padding="same", kernel_regularizer=l2(self.gene_l2_value))(
+            x)
         x = layers.BatchNormalization(momentum=0.8)(x)
         x = layers.LeakyReLU(alpha=0.2)(x)
         x = layers.Dropout(0.25)(x)
 
-        x = layers.Conv2D(512, kernel_size=3, strides=2, padding="same", kernel_regularizer=l2(self.gene_l2_value))(x)
+        x = layers.Conv2D(512, kernel_size=3, strides=2, padding="same", kernel_regularizer=l2(self.gene_l2_value))(
+            x)
         x = layers.BatchNormalization(momentum=0.8)(x)
         x = layers.LeakyReLU(alpha=0.2)(x)
         x = layers.Dropout(0.25)(x)
@@ -375,5 +406,6 @@ class DCGANTinyImagenetSubsetRegularizer(BaseDCGAN):
         features = layers.Flatten()(x)
 
         validity = layers.Dense(1, activation='sigmoid', name='discriminator')(features)
+        aux = layers.Dense(self.num_classes, activation='softmax', name='auxiliary')(features)
 
-        return models.Model(image, validity)
+        return models.Model(image, [validity, aux])
