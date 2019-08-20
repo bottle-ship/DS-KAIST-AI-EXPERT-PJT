@@ -172,8 +172,7 @@ class BaseDCGAN(object):
                 if log_dir is not None:
                     self.save_model(model_dir_name=os.path.join(log_dir, 'iteration_%05d' % iteration))
                     pd.DataFrame(self.history, columns=['Epochs', 'Loss_Disc', 'Loss_Gene', 'FID']).to_csv(
-                        os.path.join(os.path.join(log_dir, 'iteration_%05d' % iteration), 'history.csv'),
-                        index=False
+                        os.path.join(log_dir, 'history.csv'), index=False
                     )
                     ref_gen_imgs = self.generator.predict(ref_noise)
                     ref_gen_imgs = self._unscaling_image(ref_gen_imgs)
