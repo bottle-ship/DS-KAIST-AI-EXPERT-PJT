@@ -9,6 +9,7 @@ from keras import backend as K
 from keras import layers
 from keras import models
 from keras.optimizers import Adam
+from keras.regularizers import l2
 from keras.utils import plot_model
 
 from ..metrics.fid import fid_with_realdata_stats
@@ -293,9 +294,7 @@ class DCGANTinyImagenetSubset(BaseDCGAN):
         return models.Model(image, validity)
 
 
-#  https://github.com/khanrc/tf.gans-comparison/blob/master/models/wgan_gp.py
-
-class DCGANTinyImagenetSubsetResidual(BaseDCGAN):
+class DCGANTinyImagenetSubsetRegularizer(BaseDCGAN):
 
     def __init__(self, input_shape,
                  latent_dim,
@@ -310,8 +309,12 @@ class DCGANTinyImagenetSubsetResidual(BaseDCGAN):
                  disc_weights_path=None,
                  gene_model_path=None,
                  gene_weights_path=None,
+                 disc_l2_value=0.0,
+                 gene_l2_value=0.0,
                  tf_verbose=False):
-        super(DCGANTinyImagenetSubsetResidual, self).__init__(
+        self.disc_l2_value = disc_l2_value
+        self.gene_l2_value = gene_l2_value
+        super(DCGANTinyImagenetSubsetRegularizer, self).__init__(
             input_shape=input_shape,
             latent_dim=latent_dim,
             batch_size=batch_size,
@@ -327,56 +330,25 @@ class DCGANTinyImagenetSubsetResidual(BaseDCGAN):
             gene_weights_path=gene_weights_path,
             tf_verbose=tf_verbose
         )
-        self.nf = self.input_shape[1]
-
-    @staticmethod
-    def _residual_block_down(inputs, outputs, kernel_size=(3, 3)):
-        input_shape = inputs.shape
-        print(inputs.shape)
-        nf_input = input_shape[-1]
-
-        shortcut = layers.AveragePooling2D(pool_size=(2, 2))(inputs)
-        shortcut = layers.Conv2D(outputs, kernel_size=(1, 1))(shortcut)
-
-        net = layers.ReLU()(inputs)
-        # net = tf.keras.layers.BatchNormalization()(net)
-        net = layers.Conv2D(nf_input, kernel_size=kernel_size)(net)
-        net = layers.ReLU()(net)
-        # net = tf.keras.layers.BatchNormalization()(net)
-        net = layers.Conv2D(outputs, kernel_size=kernel_size)(net)
-        net = layers.AveragePooling2D(pool_size=(2, 2))(net)
-
-        return layers.Add()([shortcut, net])
-
-    @staticmethod
-    def _residual_block_up(inputs, outputs, kernel_size=(3, 3)):
-        shortcut = layers.UpSampling2D()(inputs)
-        shortcut = layers.Conv2D(outputs, kernel_size=(1, 1))(shortcut)
-
-        net = layers.ReLU()(inputs)
-        net = layers.BatchNormalization(momentum=0.8)(net)
-        net = layers.UpSampling2D()(net)
-        net = layers.Conv2D(outputs, kernel_size=kernel_size)(net)
-        net = layers.ReLU()(net)
-        net = layers.BatchNormalization(momentum=0.8)(net)
-        net = layers.Conv2D(outputs, kernel_size=kernel_size)(net)
-
-        return layers.Add()([shortcut, net])
 
     def _build_generator(self):
-        nf = self.input_shape[1]
-
         inputs = layers.Input(shape=(self.latent_dim,))
 
-        x = layers.Dense(8 * nf * 4 * 4)(inputs)
-        x = layers.Reshape((4, 4, 8 * nf))(x)
+        x = layers.Dense(512 * 4 * 4)(inputs)
+        x = layers.ReLU()(x)
+        x = layers.Reshape((4, 4, 512))(x)
 
-        x = self._residual_block_up(x, 8 * nf)
-        x = self._residual_block_up(x, 4 * nf)
-        x = self._residual_block_up(x, 2 * nf)
-        x = self._residual_block_up(x, 1 * nf)
-
+        x = layers.UpSampling2D()(x)
+        x = layers.Conv2D(256, kernel_size=3, padding="same", kernel_regularizer=l2(self.disc_l2_value))(x)
+        x = layers.ReLU()(x)
         x = layers.BatchNormalization(momentum=0.8)(x)
+
+        x = layers.UpSampling2D()(x)
+        x = layers.Conv2D(128, kernel_size=3, padding="same", kernel_regularizer=l2(self.disc_l2_value))(x)
+        x = layers.ReLU()(x)
+        x = layers.BatchNormalization(momentum=0.8)(x)
+
+        x = layers.UpSampling2D()(x)
         x = layers.Conv2D(self.input_channel_, kernel_size=3, padding="same")(x)
 
         fake = layers.Activation(self.fake_activation)(x)
@@ -384,19 +356,24 @@ class DCGANTinyImagenetSubsetResidual(BaseDCGAN):
         return models.Model(inputs, fake)
 
     def _build_discriminator(self):
-        nf = self.input_shape[1]
-
         image = layers.Input(shape=self.input_shape)
 
-        x = layers.Conv2D(nf, kernel_size=3)(image)
+        x = layers.Conv2D(128, kernel_size=5, strides=2, padding="same")(image)
+        x = layers.LeakyReLU(alpha=0.2)(x)
+        x = layers.Dropout(0.25)(x)
 
-        x = self._residual_block_down(x, 2 * nf)
-        x = self._residual_block_down(x, 4 * nf)
-        x = self._residual_block_down(x, 8 * nf)
-        x = self._residual_block_down(x, 8 * nf)
+        x = layers.Conv2D(256, kernel_size=3, strides=1, padding="same", kernel_regularizer=l2(self.gene_l2_value))(x)
+        x = layers.BatchNormalization(momentum=0.8)(x)
+        x = layers.LeakyReLU(alpha=0.2)(x)
+        x = layers.Dropout(0.25)(x)
+
+        x = layers.Conv2D(512, kernel_size=3, strides=2, padding="same", kernel_regularizer=l2(self.gene_l2_value))(x)
+        x = layers.BatchNormalization(momentum=0.8)(x)
+        x = layers.LeakyReLU(alpha=0.2)(x)
+        x = layers.Dropout(0.25)(x)
 
         features = layers.Flatten()(x)
 
-        validity = layers.Dense(1, name='discriminator')(features)
+        validity = layers.Dense(1, activation='sigmoid', name='discriminator')(features)
 
         return models.Model(image, validity)

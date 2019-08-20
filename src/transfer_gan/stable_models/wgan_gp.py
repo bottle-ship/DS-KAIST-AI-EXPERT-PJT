@@ -11,6 +11,7 @@ from keras import layers
 from keras import models
 from keras.layers.merge import _Merge
 from keras.optimizers import Adam
+from keras.regularizers import l2
 from keras.utils import plot_model
 
 from ..metrics.fid import fid_with_realdata_stats
@@ -373,6 +374,96 @@ class WGANGPTinyImagenetSubset(BaseWGANGP):
         x = layers.Dropout(0.25)(x)
 
         x = layers.Conv2D(512, kernel_size=3, strides=2, padding="same")(x)
+        x = layers.BatchNormalization(momentum=0.8)(x)
+        x = layers.LeakyReLU(alpha=0.2)(x)
+        x = layers.Dropout(0.25)(x)
+
+        features = layers.Flatten()(x)
+
+        validity = layers.Dense(1, name='discriminator')(features)
+
+        return models.Model(image, validity)
+
+
+class WGANGPTinyImagenetSubsetRegularizer(BaseWGANGP):
+
+    def __init__(self, input_shape,
+                 latent_dim,
+                 batch_size=128,
+                 fake_activation='tanh',
+                 learning_rate=0.0002,
+                 adam_beta_1=0,
+                 adam_beta_2=0.9,
+                 gp_loss_weight=10,
+                 iterations=50000,
+                 n_critic=5,
+                 fid_stats_path=None,
+                 n_fid_samples=5000,
+                 disc_model_path=None,
+                 disc_weights_path=None,
+                 gene_model_path=None,
+                 gene_weights_path=None,
+                 disc_l2_value=0.0,
+                 gene_l2_value=0.0,
+                 tf_verbose=False):
+        self.disc_l2_value = disc_l2_value
+        self.gene_l2_value = gene_l2_value
+        super(WGANGPTinyImagenetSubsetRegularizer, self).__init__(
+            input_shape=input_shape,
+            latent_dim=latent_dim,
+            batch_size=batch_size,
+            fake_activation=fake_activation,
+            learning_rate=learning_rate,
+            adam_beta_1=adam_beta_1,
+            adam_beta_2=adam_beta_2,
+            gp_loss_weight=gp_loss_weight,
+            iterations=iterations,
+            n_critic=n_critic,
+            fid_stats_path=fid_stats_path,
+            n_fid_samples=n_fid_samples,
+            disc_model_path=disc_model_path,
+            disc_weights_path=disc_weights_path,
+            gene_model_path=gene_model_path,
+            gene_weights_path=gene_weights_path,
+            tf_verbose=tf_verbose
+        )
+
+    def _build_generator(self):
+        inputs = layers.Input(shape=(self.latent_dim,))
+
+        x = layers.Dense(512 * 4 * 4)(inputs)
+        x = layers.Reshape((4, 4, 512))(x)
+
+        x = layers.UpSampling2D()(x)
+        x = layers.Conv2D(256, kernel_size=3, padding="same", kernel_regularizer=l2(self.disc_l2_value))(x)
+        x = layers.ReLU()(x)
+        x = layers.BatchNormalization(momentum=0.8)(x)
+
+        x = layers.UpSampling2D()(x)
+        x = layers.Conv2D(128, kernel_size=3, padding="same", kernel_regularizer=l2(self.disc_l2_value))(x)
+        x = layers.ReLU()(x)
+        x = layers.BatchNormalization(momentum=0.8)(x)
+
+        x = layers.UpSampling2D()(x)
+        x = layers.Conv2D(self.input_channel_, kernel_size=3, padding="same")(x)
+
+        fake = layers.Activation(self.fake_activation)(x)
+
+        return models.Model(inputs, fake)
+
+    def _build_discriminator(self):
+        image = layers.Input(shape=self.input_shape)
+
+        x = layers.Conv2D(128, kernel_size=5, strides=2, padding="same")(image)
+        x = layers.LeakyReLU(alpha=0.2)(x)
+        x = layers.Dropout(0.25)(x)
+
+        x = layers.Conv2D(256, kernel_size=3, strides=1, padding="same", kernel_regularizer=l2(self.gene_l2_value))(x)
+        x = layers.BatchNormalization(momentum=0.8)(x)
+        x = layers.LeakyReLU(alpha=0.2)(x)
+        x = layers.Dropout(0.25)(x)
+
+        x = layers.Conv2D(512, kernel_size=3, strides=2, padding="same", kernel_regularizer=l2(self.gene_l2_value))(x)
         x = layers.BatchNormalization(momentum=0.8)(x)
         x = layers.LeakyReLU(alpha=0.2)(x)
         x = layers.Dropout(0.25)(x)
