@@ -5,9 +5,11 @@ import pandas as pd
 import tensorflow as tf
 
 from abc import abstractmethod
+from functools import partial
 from keras import backend as K
 from keras import layers
 from keras import models
+from keras.layers.merge import _Merge
 from keras.optimizers import Adam
 from keras.utils import plot_model
 
@@ -17,7 +19,19 @@ from ..utils.os_utils import make_directory
 from ..utils.visualization import show_generated_image
 
 
-class BaseDCGAN(object):
+class RandomWeightedAverage(_Merge):
+    """Provides a (random) weighted average between real and generated image samples"""
+
+    def __init__(self, batch_size):
+        super(RandomWeightedAverage, self).__init__()
+        self.batch_size = batch_size
+
+    def _merge_function(self, inputs):
+        alpha = K.random_uniform((self.batch_size, 1, 1, 1))
+        return (alpha * inputs[0]) + ((1 - alpha) * inputs[1])
+
+
+class BaseWGANGP(object):
 
     def __init__(self, input_shape,
                  latent_dim,
@@ -25,7 +39,10 @@ class BaseDCGAN(object):
                  fake_activation,
                  learning_rate,
                  adam_beta_1,
+                 adam_beta_2,
+                 gp_loss_weight,
                  iterations,
+                 n_critic,
                  fid_stats_path,
                  n_fid_samples,
                  disc_model_path,
@@ -47,20 +64,22 @@ class BaseDCGAN(object):
         self.fake_activation = fake_activation
         self.learning_rate = learning_rate
         self.adam_beta_1 = adam_beta_1
+        self.adam_beta_2 = adam_beta_2
+        self.gp_loss_weight = gp_loss_weight
         self.iterations = iterations
+        self.n_disc = n_critic
         self.fid_stats_path = fid_stats_path
         self.n_fid_samples = n_fid_samples
 
         self.input_channel_ = self.input_shape[-1]
 
-        self.optimizer = Adam(self.learning_rate, self.adam_beta_1)
+        self.optimizer = Adam(lr=self.learning_rate, beta_1=self.adam_beta_1, beta_2=self.adam_beta_2)
 
-        # Build and compile the discriminator
+        # Build the critic & generator
         if disc_model_path is None:
             self.discriminator = self._build_discriminator()
         else:
             self.discriminator = load_model_from_json(disc_model_path)
-        self._compile_discriminator()
 
         if disc_weights_path is not None:
             self.discriminator.load_weights(disc_weights_path)
@@ -75,27 +94,59 @@ class BaseDCGAN(object):
         if gene_weights_path is not None:
             self.generator.load_weights(gene_weights_path)
 
-        # The generator takes noise as input and generates imgs
-        z = layers.Input(shape=(self.latent_dim,))
-        img = self.generator(z)
+        self.generator.trainable = False
 
-        # For the combined model we will only train the generator
+        # Image input (real sample)
+        real_img = layers.Input(shape=self.input_shape)
+        z_disc = layers.Input(shape=(self.latent_dim,))
+
+        # Generate image based of noise (fake sample) and add label to the input
+        fake_img = self.generator(z_disc)
+
+        # The critic takes generated images as input and determines validity
+        valid = self.discriminator(real_img)
+        fake = self.discriminator([fake_img])
+
+        # Construct weighted average between real and fake images
+        interpolated_img = RandomWeightedAverage(batch_size=self.batch_size)([real_img, fake_img])
+
+        # Determine validity of weighted sample
+        validity_interpolated = self.discriminator(interpolated_img)
+
+        # Use Python partial to provide loss function with additional
+        # 'averaged_samples' argument
+        partial_gp_loss = partial(self._gradient_penalty_loss, averaged_samples=interpolated_img)
+        partial_gp_loss.__name__ = 'gradient_penalty'  # Keras requires function names
+
+        self.critic_model = models.Model(inputs=[real_img, z_disc], outputs=[valid, fake, validity_interpolated])
+        self.critic_model.compile(loss=[self._wasserstein_loss,
+                                        self._wasserstein_loss,
+                                        partial_gp_loss],
+                                  optimizer=self.optimizer,
+                                  loss_weights=[1, 1, self.gp_loss_weight])
+
+        # -------------------------------
+        # Construct Computational Graph
+        #         for Generator
+        # -------------------------------
+
+        # For the generator we freeze the critic's layers
         self.discriminator.trainable = False
+        self.generator.trainable = True
 
-        # The discriminator takes generated images as input and determines validity
+        # Sampled noise for input to generator
+        z_gen = layers.Input(shape=(self.latent_dim,))
+
+        # Generate images based of noise
+        img = self.generator(z_gen)
+        # Discriminator determines validity
         valid = self.discriminator(img)
 
-        # The combined model  (stacked generator and discriminator)
-        # Trains the generator to fool the discriminator
-        self.combined = models.Model(z, valid)
-        self.combined.compile(loss='binary_crossentropy', optimizer=self.optimizer)
+        # Defines generator model
+        self.generator_model = models.Model(z_gen, valid)
+        self.generator_model.compile(loss=self._wasserstein_loss, optimizer=self.optimizer)
 
         self.history = list()
-
-    def _compile_discriminator(self):
-        self.discriminator.compile(loss='binary_crossentropy',
-                                   optimizer=self.optimizer,
-                                   metrics=['accuracy'])
 
     def _scaling_image(self, x):
         if self.fake_activation == 'sigmoid':
@@ -126,6 +177,27 @@ class BaseDCGAN(object):
                 (self.input_shape, self.generator.output_shape[1:])
             )
 
+    @staticmethod
+    def _gradient_penalty_loss(y_true, y_pred, averaged_samples):
+        """
+        Computes gradient penalty based on prediction and weighted real / fake samples
+        """
+        gradients = K.gradients(y_pred, averaged_samples)[0]
+        # compute the euclidean norm by squaring ...
+        gradients_sqr = K.square(gradients)
+        #   ... summing over the rows ...
+        gradients_sqr_sum = K.sum(gradients_sqr, axis=np.arange(1, len(gradients_sqr.shape)))
+        #   ... and sqrt
+        gradient_l2_norm = K.sqrt(gradients_sqr_sum)
+        # compute lambda * (1 - ||grad||)^2 still for each single sample
+        gradient_penalty = K.square(1 - gradient_l2_norm)
+        # return the mean as loss over all the batch samples
+        return K.mean(gradient_penalty)
+
+    @staticmethod
+    def _wasserstein_loss(y_true, y_pred):
+        return K.mean(y_true * y_pred)
+
     @abstractmethod
     def _build_generator(self):
         raise NotImplementedError
@@ -142,24 +214,38 @@ class BaseDCGAN(object):
 
         scaled_x = self._scaling_image(x)
 
-        valid = np.ones((self.batch_size, 1))
-        fake = np.zeros((self.batch_size, 1))
+        valid = -np.ones((self.batch_size, 1))
+        fake = np.ones((self.batch_size, 1))
+        dummy = np.zeros((self.batch_size, 1))  # Dummy gt for gradient penalty
 
         ref_noise = np.random.normal(0, 1, (self.batch_size, self.latent_dim))
         ref_fid_noise = np.random.normal(0, 1, (self.n_fid_samples, self.latent_dim))
 
         for iteration in range(self.iterations):
-            idx = np.random.randint(0, scaled_x.shape[0], self.batch_size)
-            imgs = scaled_x[idx]
 
-            noise = np.random.normal(0, 1, (self.batch_size, self.latent_dim))
-            gen_imgs = self.generator.predict(noise)
+            noise = None
+            d_loss = None
 
-            d_loss_real = self.discriminator.train_on_batch(imgs, valid)
-            d_loss_fake = self.discriminator.train_on_batch(gen_imgs, fake)
-            d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+            for _ in range(self.n_disc):
 
-            g_loss = self.combined.train_on_batch(noise, valid)
+                # ---------------------
+                #  Train Discriminator
+                # ---------------------
+
+                # Select a random batch of images
+                idx = np.random.randint(0, scaled_x.shape[0], self.batch_size)
+                imgs = scaled_x[idx]
+
+                # Sample noise as generator input
+                noise = np.random.normal(0, 1, (self.batch_size, self.latent_dim))
+
+                # Train the critic
+                d_loss = self.critic_model.train_on_batch([imgs, noise], [valid, fake, dummy])
+
+            # ---------------------
+            #  Train Generator
+            # ---------------------
+            g_loss = self.generator_model.train_on_batch(noise, valid)
 
             if iteration % save_interval == 0:
                 gen_imgs = self.generator.predict(ref_fid_noise)
@@ -212,7 +298,7 @@ class BaseDCGAN(object):
         self.discriminator.save_weights(os.path.join(model_dir_name, 'discriminator_weights.h5'))
 
 
-class DCGANTinyImagenetSubset(BaseDCGAN):
+class WGANGPTinyImagenetSubset(BaseWGANGP):
 
     def __init__(self, input_shape,
                  latent_dim,
@@ -220,7 +306,10 @@ class DCGANTinyImagenetSubset(BaseDCGAN):
                  fake_activation='tanh',
                  learning_rate=0.0002,
                  adam_beta_1=0.5,
+                 adam_beta_2=0.9,
+                 gp_loss_weight=10,
                  iterations=50000,
+                 n_critic=5,
                  fid_stats_path=None,
                  n_fid_samples=5000,
                  disc_model_path=None,
@@ -228,14 +317,17 @@ class DCGANTinyImagenetSubset(BaseDCGAN):
                  gene_model_path=None,
                  gene_weights_path=None,
                  tf_verbose=False):
-        super(DCGANTinyImagenetSubset, self).__init__(
+        super(WGANGPTinyImagenetSubset, self).__init__(
             input_shape=input_shape,
             latent_dim=latent_dim,
             batch_size=batch_size,
             fake_activation=fake_activation,
             learning_rate=learning_rate,
             adam_beta_1=adam_beta_1,
+            adam_beta_2=adam_beta_2,
+            gp_loss_weight=gp_loss_weight,
             iterations=iterations,
+            n_critic=n_critic,
             fid_stats_path=fid_stats_path,
             n_fid_samples=n_fid_samples,
             disc_model_path=disc_model_path,
@@ -249,7 +341,6 @@ class DCGANTinyImagenetSubset(BaseDCGAN):
         inputs = layers.Input(shape=(self.latent_dim,))
 
         x = layers.Dense(512 * 4 * 4)(inputs)
-        x = layers.ReLU()(x)
         x = layers.Reshape((4, 4, 512))(x)
 
         x = layers.UpSampling2D()(x)
@@ -285,115 +376,6 @@ class DCGANTinyImagenetSubset(BaseDCGAN):
         x = layers.BatchNormalization(momentum=0.8)(x)
         x = layers.LeakyReLU(alpha=0.2)(x)
         x = layers.Dropout(0.25)(x)
-
-        features = layers.Flatten()(x)
-
-        validity = layers.Dense(1, activation='sigmoid', name='discriminator')(features)
-
-        return models.Model(image, validity)
-
-
-#  https://github.com/khanrc/tf.gans-comparison/blob/master/models/wgan_gp.py
-
-class DCGANTinyImagenetSubsetResidual(BaseDCGAN):
-
-    def __init__(self, input_shape,
-                 latent_dim,
-                 batch_size=128,
-                 fake_activation='tanh',
-                 learning_rate=0.0002,
-                 adam_beta_1=0.5,
-                 iterations=50000,
-                 fid_stats_path=None,
-                 n_fid_samples=5000,
-                 disc_model_path=None,
-                 disc_weights_path=None,
-                 gene_model_path=None,
-                 gene_weights_path=None,
-                 tf_verbose=False):
-        super(DCGANTinyImagenetSubsetResidual, self).__init__(
-            input_shape=input_shape,
-            latent_dim=latent_dim,
-            batch_size=batch_size,
-            fake_activation=fake_activation,
-            learning_rate=learning_rate,
-            adam_beta_1=adam_beta_1,
-            iterations=iterations,
-            fid_stats_path=fid_stats_path,
-            n_fid_samples=n_fid_samples,
-            disc_model_path=disc_model_path,
-            disc_weights_path=disc_weights_path,
-            gene_model_path=gene_model_path,
-            gene_weights_path=gene_weights_path,
-            tf_verbose=tf_verbose
-        )
-        self.nf = self.input_shape[1]
-
-    @staticmethod
-    def _residual_block_down(inputs, outputs, kernel_size=(3, 3)):
-        input_shape = inputs.shape
-        print(inputs.shape)
-        nf_input = input_shape[-1]
-
-        shortcut = layers.AveragePooling2D(pool_size=(2, 2))(inputs)
-        shortcut = layers.Conv2D(outputs, kernel_size=(1, 1))(shortcut)
-
-        net = layers.ReLU()(inputs)
-        # net = tf.keras.layers.BatchNormalization()(net)
-        net = layers.Conv2D(nf_input, kernel_size=kernel_size)(net)
-        net = layers.ReLU()(net)
-        # net = tf.keras.layers.BatchNormalization()(net)
-        net = layers.Conv2D(outputs, kernel_size=kernel_size)(net)
-        net = layers.AveragePooling2D(pool_size=(2, 2))(net)
-
-        return layers.Add()([shortcut, net])
-
-    @staticmethod
-    def _residual_block_up(inputs, outputs, kernel_size=(3, 3)):
-        shortcut = layers.UpSampling2D()(inputs)
-        shortcut = layers.Conv2D(outputs, kernel_size=(1, 1))(shortcut)
-
-        net = layers.ReLU()(inputs)
-        net = layers.BatchNormalization(momentum=0.8)(net)
-        net = layers.UpSampling2D()(net)
-        net = layers.Conv2D(outputs, kernel_size=kernel_size)(net)
-        net = layers.ReLU()(net)
-        net = layers.BatchNormalization(momentum=0.8)(net)
-        net = layers.Conv2D(outputs, kernel_size=kernel_size)(net)
-
-        return layers.Add()([shortcut, net])
-
-    def _build_generator(self):
-        nf = self.input_shape[1]
-
-        inputs = layers.Input(shape=(self.latent_dim,))
-
-        x = layers.Dense(8 * nf * 4 * 4)(inputs)
-        x = layers.Reshape((4, 4, 8 * nf))(x)
-
-        x = self._residual_block_up(x, 8 * nf)
-        x = self._residual_block_up(x, 4 * nf)
-        x = self._residual_block_up(x, 2 * nf)
-        x = self._residual_block_up(x, 1 * nf)
-
-        x = layers.BatchNormalization(momentum=0.8)(x)
-        x = layers.Conv2D(self.input_channel_, kernel_size=3, padding="same")(x)
-
-        fake = layers.Activation(self.fake_activation)(x)
-
-        return models.Model(inputs, fake)
-
-    def _build_discriminator(self):
-        nf = self.input_shape[1]
-
-        image = layers.Input(shape=self.input_shape)
-
-        x = layers.Conv2D(nf, kernel_size=3)(image)
-
-        x = self._residual_block_down(x, 2 * nf)
-        x = self._residual_block_down(x, 4 * nf)
-        x = self._residual_block_down(x, 8 * nf)
-        x = self._residual_block_down(x, 8 * nf)
 
         features = layers.Flatten()(x)
 
