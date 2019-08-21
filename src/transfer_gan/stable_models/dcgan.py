@@ -78,19 +78,7 @@ class BaseDCGAN(object):
         if gene_weights_path is not None:
             self.generator.load_weights(gene_weights_path)
 
-        # The generator takes noise as input and generates imgs
-        z = layers.Input(shape=(self.latent_dim,))
-        img = self.generator(z)
-
-        # For the combined model we will only train the generator
-        self.discriminator.trainable = False
-
-        # The discriminator takes generated images as input and determines validity
-        valid = self.discriminator(img)
-
-        # The combined model  (stacked generator and discriminator)
-        # Trains the generator to fool the discriminator
-        self.combined = models.Model(z, valid)
+        self.combined = None
         self.compile_combine_model()
 
     def _scaling_image(self, x):
@@ -137,7 +125,19 @@ class BaseDCGAN(object):
                                    metrics=['accuracy'])
 
     def compile_combine_model(self):
+        # The generator takes noise as input and generates imgs
+        z = layers.Input(shape=(self.latent_dim,))
+        img = self.generator(z)
+
+        # For the combined model we will only train the generator
         self.discriminator.trainable = False
+
+        # The discriminator takes generated images as input and determines validity
+        valid = self.discriminator(img)
+
+        # The combined model  (stacked generator and discriminator)
+        # Trains the generator to fool the discriminator
+        self.combined = models.Model(z, valid)
         self.combined.compile(loss='binary_crossentropy', optimizer=self.optimizer)
 
     def fit(self, x, log_dir=None, save_interval=50):
