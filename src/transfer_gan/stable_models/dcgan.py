@@ -54,6 +54,8 @@ class BaseDCGAN(object):
 
         self.input_channel_ = self.input_shape[-1]
 
+        self.history = list()
+
         self.optimizer = Adam(self.learning_rate, self.adam_beta_1)
 
         # Build and compile the discriminator
@@ -61,7 +63,7 @@ class BaseDCGAN(object):
             self.discriminator = self._build_discriminator()
         else:
             self.discriminator = load_model_from_json(disc_model_path)
-        self._compile_discriminator()
+        self.compile_discriminator()
 
         if disc_weights_path is not None:
             self.discriminator.load_weights(disc_weights_path)
@@ -89,14 +91,7 @@ class BaseDCGAN(object):
         # The combined model  (stacked generator and discriminator)
         # Trains the generator to fool the discriminator
         self.combined = models.Model(z, valid)
-        self.combined.compile(loss='binary_crossentropy', optimizer=self.optimizer)
-
-        self.history = list()
-
-    def _compile_discriminator(self):
-        self.discriminator.compile(loss='binary_crossentropy',
-                                   optimizer=self.optimizer,
-                                   metrics=['accuracy'])
+        self.compile_combine_model()
 
     def _scaling_image(self, x):
         if self.fake_activation == 'sigmoid':
@@ -134,6 +129,16 @@ class BaseDCGAN(object):
     @abstractmethod
     def _build_discriminator(self):
         raise NotImplementedError
+
+    def compile_discriminator(self):
+        self.discriminator.trainable = True
+        self.discriminator.compile(loss='binary_crossentropy',
+                                   optimizer=self.optimizer,
+                                   metrics=['accuracy'])
+
+    def compile_combine_model(self):
+        self.discriminator.trainable = False
+        self.combined.compile(loss='binary_crossentropy', optimizer=self.optimizer)
 
     def fit(self, x, log_dir=None, save_interval=50):
         if log_dir is not None:
