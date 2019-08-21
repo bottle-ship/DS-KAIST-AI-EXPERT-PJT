@@ -62,7 +62,7 @@ def show_generated_image(x, n_col=8, filename=None):
     plt.close()
 
 
-def show_compare_fid_history(history_path_list, label_list, filename=None):
+def show_compare_fid_history(history_path_list, label_list, xlim=None, title=None, filename=None):
     df_list = list()
     for history_path in history_path_list:
         df_list.append(pd.read_csv(history_path))
@@ -79,12 +79,49 @@ def show_compare_fid_history(history_path_list, label_list, filename=None):
 
         ax.plot(df['Epochs'].values.tolist(), df['FID'].values.tolist(), label=label)
 
-    ax.set_xlabel('Epochs', fontsize=14)
-    ax.set_ylabel('FID', fontsize=14)
+    ax.set_xlabel('Iteration', fontsize=24)
+    ax.set_ylabel('FID', fontsize=24)
 
-    ax.set_xlim(0, max_epochs)
+    if xlim is None:
+        ax.set_xlim(0, max_epochs)
+    else:
+        ax.set_xlim(0, xlim)
 
     plt.legend()
+
+    if title is not None:
+        plt.title(title, fontsize=24)
+
+    if filename is not None:
+        plt.savefig(filename)
+    else:
+        plt.show()
+    plt.close()
+
+
+def show_compare_fid_bar_plot(history_path_list, label_list, max_epochs, title=None, filename=None):
+    df_list = list()
+    for history_path in history_path_list:
+        df_list.append(pd.read_csv(history_path))
+
+    for i in range(0, len(df_list)):
+        df_list[i] = df_list[i][df_list[i]['Epochs'] <= max_epochs]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+
+    idx = 0
+    for df, label in zip(df_list, label_list):
+        ax.bar(idx, df['FID'].min(), label=label)
+        idx += 1
+
+    ax.set_ylabel('FID', fontsize=24)
+    ax.set_xticks([])
+
+    plt.legend()
+
+    if title is not None:
+        plt.title(title, fontsize=24)
 
     if filename is not None:
         plt.savefig(filename)
