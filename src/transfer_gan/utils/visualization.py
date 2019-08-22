@@ -128,3 +128,53 @@ def show_compare_fid_bar_plot(history_path_list, label_list, max_epochs, title=N
     else:
         plt.show()
     plt.close()
+
+
+def show_compare_fid_history_n_bar_plot(history_path_list, label_list, bar_xlim, xlim=None, title=None, filename=None):
+    df_list = list()
+    for history_path in history_path_list:
+        df_list.append(pd.read_csv(history_path))
+
+    fig = plt.figure(figsize=(13, 7))
+
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2)
+
+    max_epochs = 0
+
+    for df, label in zip(df_list, label_list):
+        epochs = df['Epochs'].values.max()
+        if epochs > max_epochs:
+            max_epochs = epochs
+
+        ax1.plot(df['Epochs'].values.tolist(), df['FID'].values.tolist(), label=label)
+
+    ax1.set_xlabel('Iteration', fontsize=16)
+    ax1.set_ylabel('FID', fontsize=16)
+
+    for i in range(0, len(df_list)):
+        df_list[i] = df_list[i][df_list[i]['Epochs'] <= bar_xlim]
+
+    idx = 0
+    for df, label in zip(df_list, label_list):
+        ax2.bar(idx, df['FID'].min(), label=label)
+        idx += 1
+
+    ax2.set_ylabel('FID', fontsize=16)
+    ax2.set_xticks([])
+
+    if xlim is None:
+        ax1.set_xlim(0, max_epochs)
+    else:
+        ax1.set_xlim(0, xlim)
+
+    if title is not None:
+        plt.title(title, fontsize=18, position=(-0.1, 1))
+
+    plt.legend()
+
+    if filename is not None:
+        plt.savefig(filename)
+    else:
+        plt.show()
+    plt.close()
