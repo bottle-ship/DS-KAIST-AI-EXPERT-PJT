@@ -11,4 +11,6 @@ if __name__ == '__main__':
     title = "Initialize by teacher weights @ 10000 iteration\n" \
             "Teacher: DCGAN / Tiny imagenet # 15000 → Student: DCGAN or WGAN-GP / Cifar10 # 1000"
 
-    show_compare_fid_history_n_bar_plot(history_path_list, label_list, bar_xlim=10000, xlim=10000, title=title)
+    show_compare_fid_history_n_bar_plot(
+        history_path_list, label_list, bar_xlim=10000, xlim=10000, title=title, filename='compare.png'
+    )
