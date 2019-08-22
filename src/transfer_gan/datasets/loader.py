@@ -110,6 +110,130 @@ class DatasetLoader(object):
 
         return (x_train, y_train), (None, None), class_names
 
+    def load_cifar10_subset_700(self, data_type=32):
+        src_path = os.path.join(self.src_path, 'cifar10_subset_700.zip')
+        datadir = os.path.join(self.keras_datasets_path, 'cifar10-subset')
+
+        class_names = ['Airplane', 'Automobile', 'Bird', 'Cat', 'Deer',
+                       'Dog', 'Frog', 'Horse', 'Ship', 'Truck']
+
+        if not os.path.exists(datadir):
+            os.mkdir(datadir)
+            with zipfile.ZipFile(src_path) as zf:
+                zf.extractall(path=datadir)
+
+            wnids = os.listdir(datadir)
+            wnids.sort()
+            wnid_to_label = {wnid: i for i, wnid in enumerate(wnids)}
+
+            x_train = list()
+            y_train = list()
+            for label in wnid_to_label.keys():
+                target_dir = os.path.join(datadir, label)
+                for filename in os.listdir(target_dir):
+                    img = cv2.imread(os.path.join(target_dir, filename))
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    x_train.append(img)
+                    y_train.append(wnid_to_label[label])
+
+            x_train = np.array(x_train)
+            y_train = np.array(y_train)
+
+            np.save(os.path.join(datadir, 'cifar10-subset-x-train.npy'), x_train)
+            np.save(os.path.join(datadir, 'cifar10-subset-y-train.npy'), y_train)
+
+        else:
+            x_train = np.load(os.path.join(datadir, 'cifar10-subset-x-train.npy'))
+            y_train = np.load(os.path.join(datadir, 'cifar10-subset-y-train.npy'))
+
+        x_train = x_train.astype('float%d' % data_type)
+        y_train = y_train.astype('int%d' % data_type)
+
+        return (x_train, y_train), (None, None), class_names
+
+    def load_cifar10_subset_500(self, data_type=32):
+        src_path = os.path.join(self.src_path, 'cifar10_subset_500.zip')
+        datadir = os.path.join(self.keras_datasets_path, 'cifar10-subset')
+
+        class_names = ['Airplane', 'Automobile', 'Bird', 'Cat', 'Deer',
+                       'Dog', 'Frog', 'Horse', 'Ship', 'Truck']
+
+        if not os.path.exists(datadir):
+            os.mkdir(datadir)
+            with zipfile.ZipFile(src_path) as zf:
+                zf.extractall(path=datadir)
+
+            wnids = os.listdir(datadir)
+            wnids.sort()
+            wnid_to_label = {wnid: i for i, wnid in enumerate(wnids)}
+
+            x_train = list()
+            y_train = list()
+            for label in wnid_to_label.keys():
+                target_dir = os.path.join(datadir, label)
+                for filename in os.listdir(target_dir):
+                    img = cv2.imread(os.path.join(target_dir, filename))
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    x_train.append(img)
+                    y_train.append(wnid_to_label[label])
+
+            x_train = np.array(x_train)
+            y_train = np.array(y_train)
+
+            np.save(os.path.join(datadir, 'cifar10-subset-x-train.npy'), x_train)
+            np.save(os.path.join(datadir, 'cifar10-subset-y-train.npy'), y_train)
+
+        else:
+            x_train = np.load(os.path.join(datadir, 'cifar10-subset-x-train.npy'))
+            y_train = np.load(os.path.join(datadir, 'cifar10-subset-y-train.npy'))
+
+        x_train = x_train.astype('float%d' % data_type)
+        y_train = y_train.astype('int%d' % data_type)
+
+        return (x_train, y_train), (None, None), class_names
+
+    def load_cifar10_subset_300(self, data_type=32):
+        src_path = os.path.join(self.src_path, 'cifar10_subset_300.zip')
+        datadir = os.path.join(self.keras_datasets_path, 'cifar10-subset')
+
+        class_names = ['Airplane', 'Automobile', 'Bird', 'Cat', 'Deer',
+                       'Dog', 'Frog', 'Horse', 'Ship', 'Truck']
+
+        if not os.path.exists(datadir):
+            os.mkdir(datadir)
+            with zipfile.ZipFile(src_path) as zf:
+                zf.extractall(path=datadir)
+
+            wnids = os.listdir(datadir)
+            wnids.sort()
+            wnid_to_label = {wnid: i for i, wnid in enumerate(wnids)}
+
+            x_train = list()
+            y_train = list()
+            for label in wnid_to_label.keys():
+                target_dir = os.path.join(datadir, label)
+                for filename in os.listdir(target_dir):
+                    img = cv2.imread(os.path.join(target_dir, filename))
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    x_train.append(img)
+                    y_train.append(wnid_to_label[label])
+
+            x_train = np.array(x_train)
+            y_train = np.array(y_train)
+
+            np.save(os.path.join(datadir, 'cifar10-subset-x-train.npy'), x_train)
+            np.save(os.path.join(datadir, 'cifar10-subset-y-train.npy'), y_train)
+
+        else:
+            x_train = np.load(os.path.join(datadir, 'cifar10-subset-x-train.npy'))
+            y_train = np.load(os.path.join(datadir, 'cifar10-subset-y-train.npy'))
+
+        x_train = x_train.astype('float%d' % data_type)
+        y_train = y_train.astype('int%d' % data_type)
+
+        return (x_train, y_train), (None, None), class_names
+
+
     def load_tiny_imagenet(self, data_type=32):
         dirname = 'tiny-imagenet-200.zip'
         origin = 'http://cs231n.stanford.edu/tiny-imagenet-200.zip'
@@ -202,6 +326,155 @@ class DatasetLoader(object):
                     wnid_to_words[line[0]] = line[1].replace('\n', '').split(',')
             class_names = [wnid_to_words[wnid] for wnid in wnids]
             save_to_pickle(class_names, os.path.join(datadir, 'tiny-imagenet-subset-class-name.pkl'))
+
+            x_train = list()
+            y_train = list()
+            for label in wnid_to_label.keys():
+                target_dir = os.path.join(datadir, 'train', label, 'images')
+                for filename in os.listdir(target_dir):
+                    img = cv2.imread(os.path.join(target_dir, filename))
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    img = cv2.resize(img, dsize=(32, 32), interpolation=cv2.INTER_AREA)
+                    x_train.append(img)
+                    y_train.append(wnid_to_label[label])
+
+            x_train = np.array(x_train)
+            y_train = np.array(y_train)
+
+            np.save(os.path.join(datadir, 'tiny-imagenet-subset-x-train.npy'), x_train)
+            np.save(os.path.join(datadir, 'tiny-imagenet-subset-y-train.npy'), y_train)
+        else:
+            x_train = np.load(os.path.join(datadir, 'tiny-imagenet-subset-x-train.npy'))
+            y_train = np.load(os.path.join(datadir, 'tiny-imagenet-subset-y-train.npy'))
+            class_names = load_from_pickle(os.path.join(datadir, 'tiny-imagenet-subset-class-name.pkl'))
+
+        x_train = x_train.astype('float%d' % data_type)
+        y_train = y_train.astype('int%d' % data_type)
+
+        return (x_train, y_train), (None, None), class_names
+
+    def load_tiny_imagenet_13class(self, data_type=32):
+        src_path = os.path.join(self.src_path, 'tiny_subset.zip')
+        datadir = os.path.join(self.keras_datasets_path, 'tiny-imagenet-subset')
+
+        if not os.path.exists(datadir):
+            os.mkdir(datadir)
+            with zipfile.ZipFile(src_path) as zf:
+                zf.extractall(path=datadir)
+
+            wnids = os.listdir(os.path.join(datadir, 'train'))
+            wnid_to_label = {wnid: i for i, wnid in enumerate(wnids)}
+
+            with open(os.path.join(datadir, 'words.txt'), 'r') as f:
+                wnid_to_words = dict()
+                for line in f:
+                    line = line.split('\t')
+                    wnid_to_words[line[0]] = line[1].replace('\n', '').split(',')
+            class_names = ['n01644900', 'n02002724', 'n02099712', 'n02123045',
+                           'n02125311', 'n02129165', 'n02415577', 'n02423022',
+                           'n02437312', 'n03662601', 'n03670208', 'n03796401', 'n04146614']
+            # class_names = [wnid_to_words[wnid] for wnid in wnids]
+            # save_to_pickle(class_names, os.path.join(datadir, 'tiny-imagenet-subset-class-name.pkl'))
+
+            x_train = list()
+            y_train = list()
+            for label in wnid_to_label.keys():
+                target_dir = os.path.join(datadir, 'train', label, 'images')
+                for filename in os.listdir(target_dir):
+                    img = cv2.imread(os.path.join(target_dir, filename))
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    img = cv2.resize(img, dsize=(32, 32), interpolation=cv2.INTER_AREA)
+                    x_train.append(img)
+                    y_train.append(wnid_to_label[label])
+
+            x_train = np.array(x_train)
+            y_train = np.array(y_train)
+
+            np.save(os.path.join(datadir, 'tiny-imagenet-subset-x-train.npy'), x_train)
+            np.save(os.path.join(datadir, 'tiny-imagenet-subset-y-train.npy'), y_train)
+        else:
+            x_train = np.load(os.path.join(datadir, 'tiny-imagenet-subset-x-train.npy'))
+            y_train = np.load(os.path.join(datadir, 'tiny-imagenet-subset-y-train.npy'))
+            class_names = load_from_pickle(os.path.join(datadir, 'tiny-imagenet-subset-class-name.pkl'))
+
+        x_train = x_train.astype('float%d' % data_type)
+        y_train = y_train.astype('int%d' % data_type)
+
+        return (x_train, y_train), (None, None), class_names
+
+    def load_tiny_imagenet_20class(self, data_type=32):
+        src_path = os.path.join(self.src_path, 'tiny_subset.zip')
+        datadir = os.path.join(self.keras_datasets_path, 'tiny-imagenet-subset')
+
+        if not os.path.exists(datadir):
+            os.mkdir(datadir)
+            with zipfile.ZipFile(src_path) as zf:
+                zf.extractall(path=datadir)
+
+            wnids = os.listdir(os.path.join(datadir, 'train'))
+            wnid_to_label = {wnid: i for i, wnid in enumerate(wnids)}
+
+            with open(os.path.join(datadir, 'words.txt'), 'r') as f:
+                wnid_to_words = dict()
+                for line in f:
+                    line = line.split('\t')
+                    wnid_to_words[line[0]] = line[1].replace('\n', '').split(',')
+            class_names = ['n01641577', 'n01644900', 'n01855672', 'n02002724',
+                           'n02058221', 'n02085620', 'n02094433', 'n02099601',
+                           'n02099712', 'n02106662', 'n02113799', 'n02123045',
+                           'n02123394', 'n02124075', 'n02423022', 'n03447447',
+                           'n03662601', 'n03670208', 'n03977966', 'n04285008' ]
+            # class_names = [wnid_to_words[wnid] for wnid in wnids]
+            # save_to_pickle(class_names, os.path.join(datadir, 'tiny-imagenet-subset-class-name.pkl'))
+
+            x_train = list()
+            y_train = list()
+            for label in wnid_to_label.keys():
+                target_dir = os.path.join(datadir, 'train', label, 'images')
+                for filename in os.listdir(target_dir):
+                    img = cv2.imread(os.path.join(target_dir, filename))
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    img = cv2.resize(img, dsize=(32, 32), interpolation=cv2.INTER_AREA)
+                    x_train.append(img)
+                    y_train.append(wnid_to_label[label])
+
+            x_train = np.array(x_train)
+            y_train = np.array(y_train)
+
+            np.save(os.path.join(datadir, 'tiny-imagenet-subset-x-train.npy'), x_train)
+            np.save(os.path.join(datadir, 'tiny-imagenet-subset-y-train.npy'), y_train)
+        else:
+            x_train = np.load(os.path.join(datadir, 'tiny-imagenet-subset-x-train.npy'))
+            y_train = np.load(os.path.join(datadir, 'tiny-imagenet-subset-y-train.npy'))
+            class_names = load_from_pickle(os.path.join(datadir, 'tiny-imagenet-subset-class-name.pkl'))
+
+        x_train = x_train.astype('float%d' % data_type)
+        y_train = y_train.astype('int%d' % data_type)
+
+        return (x_train, y_train), (None, None), class_names
+
+
+    def load_tiny_imagenet_dogclass(self, data_type=32):
+        src_path = os.path.join(self.src_path, 'tiny_subset.zip')
+        datadir = os.path.join(self.keras_datasets_path, 'tiny-imagenet-subset')
+
+        if not os.path.exists(datadir):
+            os.mkdir(datadir)
+            with zipfile.ZipFile(src_path) as zf:
+                zf.extractall(path=datadir)
+
+            wnids = os.listdir(os.path.join(datadir, 'train'))
+            wnid_to_label = {wnid: i for i, wnid in enumerate(wnids)}
+
+            with open(os.path.join(datadir, 'words.txt'), 'r') as f:
+                wnid_to_words = dict()
+                for line in f:
+                    line = line.split('\t')
+                    wnid_to_words[line[0]] = line[1].replace('\n', '').split(',')
+            class_names = ['n02085620', 'n02094433', 'n02099601', 'n02099712',
+                           'n02106662', 'n02113799']
+            # class_names = [wnid_to_words[wnid] for wnid in wnids]
+            # save_to_pickle(class_names, os.path.join(datadir, 'tiny-imagenet-subset-class-name.pkl'))
 
             x_train = list()
             y_train = list()
