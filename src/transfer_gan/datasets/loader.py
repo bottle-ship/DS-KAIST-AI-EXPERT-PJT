@@ -117,6 +117,7 @@ class DatasetLoader(object):
         class_names = ['Airplane', 'Automobile', 'Bird', 'Cat', 'Deer',
                        'Dog', 'Frog', 'Horse', 'Ship', 'Truck']
 
+
         if not os.path.exists(datadir):
             os.mkdir(datadir)
             with zipfile.ZipFile(src_path) as zf:
